@@ -1,0 +1,78 @@
+name: Deploy demo to GitHub Pages
+
+# Builds the mobile app (as a web export) and the developer console, and
+# publishes both to GitHub Pages alongside a small landing page. This is a
+# static, client-only demo: every visitor gets their own in-memory copy of the
+# seed data, and nothing is shared between them or persisted across a refresh.
+# There is no backend behind this build - see docs/scope-traceability.md for
+# what is still outstanding before this becomes a real product.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    # Ubuntu is faster and burns fewer Actions minutes than Windows for a pure
+    # JS build; pwsh below is preinstalled on GitHub's Ubuntu runners too.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build developer console
+        working-directory: web
+        run: npx vite build
+
+      - name: Export mobile app for web
+        working-directory: mobile
+        run: npx expo export -p web
+
+      - name: Fix mobile asset paths for the /app/ subpath
+        working-directory: mobile
+        run: node scripts/fix-web-base.mjs
+
+      - name: Assemble the Pages site
+        shell: pwsh
+        run: |
+          $site = "site"
+          New-Item -ItemType Directory -Force -Path "$site/app" | Out-Null
+          New-Item -ItemType Directory -Force -Path "$site/console" | Out-Null
+          Copy-Item -Recurse -Force "mobile/dist/*" "$site/app/"
+          Copy-Item -Recurse -Force "web/dist/*" "$site/console/"
+          Copy-Item -Force "docs/pages/index.html" "$site/index.html"
+          New-Item -ItemType File -Force -Path "$site/.nojekyll" | Out-Null
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
