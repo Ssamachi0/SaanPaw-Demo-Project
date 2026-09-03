@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
-import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { theme } from '@/constants/theme';
 import {
   Avatar,
@@ -18,7 +17,7 @@ import { timeAgo } from '@/components/domain';
 import { useApp } from '@saanpaw/shared';
 
 /** Shelter Admin Module - Chat with owners about their reports. */
-export function MessagesScreen({ navigation }: NativeStackScreenProps<any>) {
+export function MessagesScreen() {
   const { conversations, currentShelter, messagesIn, sendMessage, reportById } = useApp();
   const [openId, setOpenId] = useState<string | null>(null);
   const [draft, setDraft] = useState('');

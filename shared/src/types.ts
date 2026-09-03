@@ -5,11 +5,6 @@ export interface LatLng {
   longitude: number;
 }
 
-export interface GeoPoint {
-  type: 'Point';
-  coordinates: [number, number]; // [lng, lat] - GeoJSON order, matches the backend
-}
-
 export type AnimalType = 'dog' | 'cat' | 'other';
 export type AnimalSex = 'male' | 'female' | 'unknown';
 export type AnimalSize = 'small' | 'medium' | 'large';

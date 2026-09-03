@@ -12,7 +12,8 @@
     ],
     "web": {
       "bundler": "metro",
-      "output": "single"
+      "output": "single",
+      "favicon": "./assets/favicon.png"
     },
     "ios": {
       "supportsTablet": false,
@@ -29,7 +30,11 @@
         "ACCESS_COARSE_LOCATION",
         "CAMERA",
         "READ_MEDIA_IMAGES"
-      ]
+      ],
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0B3D22"
+      }
     },
     "plugins": [
       "expo-location",
@@ -37,6 +42,12 @@
       "expo-notifications",
       "expo-secure-store",
       "expo-font"
-    ]
+    ],
+    "icon": "./assets/icon.png",
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#F7F1E4"
+    }
   }
 }

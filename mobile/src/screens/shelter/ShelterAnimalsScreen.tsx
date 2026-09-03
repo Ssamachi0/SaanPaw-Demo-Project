@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import { View } from 'react-native';
-import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import * as ImagePicker from 'expo-image-picker';
 import { theme } from '@/constants/theme';
 import {
@@ -23,9 +22,8 @@ import { useApp } from '@saanpaw/shared';
 import type { AnimalCaseStatus, AnimalType, ShelterAnimal } from '@saanpaw/shared';
 
 /** Shelter Admin Module - The animals in this shelter's care. */
-export function ShelterAnimalsScreen({ navigation }: NativeStackScreenProps<any>) {
-  const { shelterAnimals, currentShelter, addShelterAnimal, toggleAnimalPublic, setShelterAnimalStatus } =
-    useApp();
+export function ShelterAnimalsScreen() {
+  const { shelterAnimals, currentShelter, addShelterAnimal, toggleAnimalPublic } = useApp();
 
   const [filter, setFilter] = useState<AnimalCaseStatus | 'all'>('all');
   const [adding, setAdding] = useState(false);

@@ -1,8 +1,7 @@
 import { useMemo, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
-import type { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
 import { theme } from '@/constants/theme';
-import { SJDM_BARANGAY_NAMES, distanceMeters, formatDistance, useApp } from '@saanpaw/shared';
+import { SJDM_BARANGAY_NAMES, distanceMeters, useApp } from '@saanpaw/shared';
 import type { AnimalType, ReportKind } from '@saanpaw/shared';
 import {
   Button,
@@ -36,7 +35,7 @@ const DATE_WINDOWS: Record<Exclude<DateFilter, 'any'>, number> = {
  * Filters mirror the report form fields, so you can narrow down to the animal
  * you are actually looking for.
  */
-export function SearchReportsScreen({ navigation }: BottomTabScreenProps<any>) {
+export function SearchReportsScreen() {
   const { reports, currentUser } = useApp();
 
   const [query, setQuery] = useState('');

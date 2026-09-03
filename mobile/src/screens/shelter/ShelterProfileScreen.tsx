@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import { Text, View } from 'react-native';
-import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { theme } from '@/constants/theme';
 import { RADIUS_OPTIONS, SJDM_BARANGAYS, SJDM_BARANGAY_NAMES, formatDistance, useApp } from '@saanpaw/shared';
 import {
@@ -24,7 +23,7 @@ import { useAuth } from '@/context/AuthContext';
  * Shelter Admin Module - Shelter details and contact info.
  * The operating radius set here decides which reports reach this shelter.
  */
-export function ShelterProfileScreen({ navigation }: NativeStackScreenProps<any>) {
+export function ShelterProfileScreen() {
   const { currentShelter, updateShelterProfile, shelterAreaReports } = useApp();
   const { signOut } = useAuth();
 

@@ -107,10 +107,6 @@ export function Card({
   return <View style={[styles.card, style]}>{children}</View>;
 }
 
-export function Divider({ style }: { style?: StyleProp<ViewStyle> }) {
-  return <View style={[styles.divider, style]} />;
-}
-
 export function Row({
   children,
   gap = 1,
@@ -130,18 +126,6 @@ export function Row({
 }
 
 /* ------------------------------------------------------------------ text */
-
-export function Title({ children }: { children: ReactNode }) {
-  return <Text style={styles.title}>{children}</Text>;
-}
-
-export function Subtitle({ children }: { children: ReactNode }) {
-  return <Text style={styles.subtitle}>{children}</Text>;
-}
-
-export function Body({ children, style }: { children: ReactNode; style?: StyleProp<TextStyle> }) {
-  return <Text style={[styles.body, style]}>{children}</Text>;
-}
 
 export function Caption({ children, style }: { children: ReactNode; style?: StyleProp<TextStyle> }) {
   return <Text style={[styles.caption, style]}>{children}</Text>;
@@ -466,30 +450,6 @@ export function Badge({
   );
 }
 
-export function StatTile({
-  value,
-  label,
-  icon,
-  color = theme.colors.primary,
-  soft = theme.colors.primarySoft,
-}: {
-  value: number | string;
-  label: string;
-  icon: IconName;
-  color?: string;
-  soft?: string;
-}) {
-  return (
-    <View style={styles.statTile}>
-      <View style={[styles.statIcon, { backgroundColor: soft }]}>
-        <Ionicons name={icon} size={17} color={color} />
-      </View>
-      <Text style={styles.statValue}>{value}</Text>
-      <Text style={styles.statLabel}>{label}</Text>
-    </View>
-  );
-}
-
 export function Avatar({ name, color = theme.colors.primary, size = 40 }: { name: string; color?: string; size?: number }) {
   const initials = name
     .split(' ')
@@ -751,11 +711,7 @@ const styles = StyleSheet.create({
     ...theme.shadow.card,
   },
   cardPressed: { opacity: 0.7 },
-  divider: { height: 1, backgroundColor: theme.colors.border, marginVertical: theme.spacing(1) },
 
-  title: { ...theme.type.h1, color: theme.colors.text },
-  subtitle: { ...theme.type.body, color: theme.colors.muted },
-  body: { ...theme.type.body, color: theme.colors.textSoft },
   caption: { ...theme.type.caption, color: theme.colors.muted },
 
   button: {
@@ -877,20 +833,6 @@ const styles = StyleSheet.create({
   },
   badgeText: { ...theme.type.tiny },
 
-  statTile: {
-    flex: 1,
-    minWidth: 96,
-    backgroundColor: theme.colors.surface,
-    borderRadius: theme.radius.xl,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    padding: theme.spacing(1.5),
-    gap: 6,
-    ...theme.shadow.card,
-  },
-  statIcon: { width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
-  statValue: { ...theme.type.stat, color: theme.colors.text },
-  statLabel: { ...theme.type.caption, fontSize: 11.5, color: theme.colors.muted },
 
   avatar: { alignItems: 'center', justifyContent: 'center' },
   avatarText: { color: '#fff', fontFamily: theme.fonts.bold },

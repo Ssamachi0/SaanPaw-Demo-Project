@@ -32,23 +32,26 @@ Credentials are pre-filled on each login screen.
 ## Layout
 
 ```
+assets/           app icon, Android adaptive icon, splash, favicon
+scripts/          fix-web-base.mjs - makes the web export subpath-safe
 src/
   navigation/     RootNavigator picks a module stack by authenticated role
   screens/
-    developer/    Figures 2-5  (Developer Module)
-    shelter/      Figures 6-12 (Shelter Admin Module)
-    user/         Figures 13-20 (User Module)
+    auth/         role picker + the shared login form
+    user/         Pet Owner module (13 screens)
+    shelter/      Shelter Admin module (10 screens)
   components/
     ui/           design-system primitives (Button, Field, Card, Sheet, ...)
     domain/       ReportCard, MatchCard, ShelterCard, NotificationRow, status pills
     map/          MapCanvas - dependency-free OpenStreetMap tile map
-  store/          AppStore - in-memory data + every mutation the UI can perform
-  mock/           seed data for SJDM (users, shelters, reports, cases, flags)
   context/        AuthContext (role session, AsyncStorage-backed)
-  services/       apiClient (axios) + service stubs for the REST phase
-  constants/      theme, config, sjdm (barangays, distance), sjdmBoundary
-  types/          shared TS types matching the planned API contract
+  services/       locationService - device GPS, geo-fenced to SJDM
+  constants/      theme - the shared tokens plus RN fonts and shadows
 ```
+
+The data model, seed data, matching logic, and colour tokens live in
+`@saanpaw/shared`, not here - see [`../shared`](../shared). The Developer
+module is a separate web app in [`../web`](../web).
 
 ## Notable implementation choices
 
@@ -72,6 +75,8 @@ override keeps exactly one `react-native` and one `react` in the tree.
 
 ## Wiring the backend
 
-`store/AppStore.tsx` is the single seam. Each action there becomes a request
-plus a refetch; the screens consume the store through `useApp()` and do not need
-to change. `services/` already holds the axios client and endpoint stubs.
+`shared/src/store/AppStore.tsx` is the single seam. Each action there becomes a
+request plus a refetch; the screens consume the store through `useApp()` and do
+not need to change. The service layer gets written against the agreed API
+contract at that point - the earlier stubs were deleted because they had already
+drifted from it.

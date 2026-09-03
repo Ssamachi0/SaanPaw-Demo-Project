@@ -153,16 +153,21 @@ reports filed hours earlier were still live — a real risk during an evening de
 `store/AppStore.tsx` now uses a rolling 24-hour window matching the API, and the
 tiles are labelled "(24h)" rather than "today" so the figure matches its caption.
 
-### Finding 4 — Backend service stubs are unreferenced · **accepted, tracked**
+### Finding 4 — Unreferenced backend service stubs · **resolved: deleted**
 
-`services/authService.ts`, `reportService.ts`, `imageRecognitionService.ts`, and
-`notificationService.ts` are not imported anywhere. This is expected: they are
-the seam for the REST phase, and `store/AppStore.tsx` currently serves the data.
+`services/apiClient.ts`, `authService.ts`, `reportService.ts`,
+`imageRecognitionService.ts`, and `notificationService.ts` were imported by
+nothing. They were written before the API contract existed, and two of them had
+already drifted from reality: `authService.ts` stored tokens with
+`expo-secure-store` (which does not work on web) while `context/AuthContext.tsx`
+uses `AsyncStorage`, and `imageRecognitionService.ts` predated the matching
+spike.
 
-One needs attention before it is used: `authService.ts` stores tokens with
-`expo-secure-store`, which does not work on web, whereas `context/AuthContext.tsx`
-uses `AsyncStorage`. Pick one storage mechanism when real authentication is
-wired up.
+All five were deleted, along with the now-unused `axios` dependency and
+`constants/config.ts`. `services/locationService.ts` is the only one that
+survived, because it is the only one actually used. The real service layer gets
+written against the agreed API contract in the backend phase, rather than kept
+as stubs that already contradict it.
 
 ### Finding 5 — Front-end and backend data models disagree · **open, blocks the backend**
 

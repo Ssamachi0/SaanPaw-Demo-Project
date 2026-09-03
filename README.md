@@ -19,6 +19,7 @@ Mark Gabriel I. Yoldi.
 | `web/`      | React + Vite developer console — the **Developer** module, a separate web application |
 | `backend/`  | Node.js + Express + TypeScript REST API, MongoDB (Mongoose) data layer |
 | `docs/`     | Chapter 3 design artifacts — architecture, flowcharts, use-case diagrams, DFD, ERD |
+| `spike/`    | Timeboxed image-recognition experiment — measures whether pre-trained embeddings can separate same-animal photos |
 
 The Developer Module is deliberately **not** in the mobile app. Shelter approvals,
 report moderation, and system management are desk work best done on a wide screen,
@@ -46,7 +47,7 @@ The folder layout mirrors the three modules defined in the proposal's
 
 1. Operates **only within San Jose Del Monte, Bulacan** — every report coordinate is
    geo-fenced against the city boundary (`backend/src/config/serviceArea.ts`,
-   `mobile/src/constants/sjdmBoundary.ts`).
+   `shared/src/sjdmBoundary.ts`).
 2. **No physical tracking hardware** — no GPS collars, RFID tags, or microchips.
    Identification is image-based only.
 3. **No integration with national government animal databases.**
@@ -61,6 +62,14 @@ npm install           # installs every workspace from the repo root
 
 npm run web:mobile    # mobile app in a browser  -> http://localhost:8081
 npm run dev:console   # developer console        -> http://localhost:5173
+```
+
+Checks and production builds:
+
+```bash
+npm run lint          # ESLint across shared, mobile, and web
+npm run typecheck     # tsc --noEmit in all three
+npm run build         # builds the console and the mobile web export
 ```
 
 To run it on a phone or Android emulator instead:
@@ -90,7 +99,7 @@ npm run dev
 | Layer | State |
 |-------|-------|
 | Shared domain (`shared/`) | Implemented — types, geo-fence, matching, seed data, design tokens |
-| Mobile app (`mobile/`) | Implemented — User + Shelter Admin modules, 16 screens |
+| Mobile app (`mobile/`) | Implemented — User + Shelter Admin modules, 23 routed screens |
 | Developer console (`web/`) | Implemented — login, dashboard, shelter approvals, report monitoring, system management |
 | Data layer | In-memory store in `shared/src/store/AppStore.tsx`, seeded from `shared/src/mock/` |
 | Backend API | Scaffolded (models, routes, services) — not yet connected to either surface |

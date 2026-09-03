@@ -9,7 +9,9 @@ const workspaceRoot = path.resolve(projectRoot, '..');
 
 const config = getDefaultConfig(projectRoot);
 
-config.watchFolders = [workspaceRoot];
+// Append rather than replace: getDefaultConfig() already sets watchFolders that
+// Expo relies on, and overwriting them outright drops those defaults.
+config.watchFolders = [...new Set([...(config.watchFolders ?? []), workspaceRoot])];
 config.resolver.nodeModulesPaths = [
   path.resolve(projectRoot, 'node_modules'),
   path.resolve(workspaceRoot, 'node_modules'),

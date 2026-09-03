@@ -105,7 +105,6 @@ export function ReportForm({
   useEffect(() => {
     void tagCurrentLocation(true);
     // Once, on open.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const pickImage = async (source: 'camera' | 'library') => {

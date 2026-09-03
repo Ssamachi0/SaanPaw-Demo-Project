@@ -1,9 +1,8 @@
 {
   "recommendations": [
     "dbaeumer.vscode-eslint",
-    "esbenp.prettier-vscode",
     "expo.vscode-expo-tools",
-    "mongodb.mongodb-vscode",
-    "bierner.markdown-mermaid"
+    "bierner.markdown-mermaid",
+    "mongodb.mongodb-vscode"
   ]
 }

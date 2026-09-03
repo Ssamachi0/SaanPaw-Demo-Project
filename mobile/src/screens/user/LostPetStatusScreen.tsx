@@ -7,7 +7,6 @@ import {
   Badge,
   Banner,
   Button,
-  Card,
   Caption,
   Choice,
   EmptyState,

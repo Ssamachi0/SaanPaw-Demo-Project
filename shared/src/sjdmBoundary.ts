@@ -4,12 +4,6 @@
  */
 export const SJDM_CENTER = { latitude: 14.8136, longitude: 121.0453 };
 
-export const SJDM_REGION = {
-  ...SJDM_CENTER,
-  latitudeDelta: 0.18,
-  longitudeDelta: 0.18,
-};
-
 // [lng, lat], same polygon as the backend.
 const RING: [number, number][] = [
   [121.010, 14.760],

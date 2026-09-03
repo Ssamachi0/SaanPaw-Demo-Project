@@ -57,7 +57,7 @@ copy, and what happens after submission.
 | Layer | File | Purpose |
 |-------|------|---------|
 | Design tokens | `shared/src/theme.ts` (+ `mobile/src/constants/theme.ts`, `web/src/tokens.ts`) | Colour, spacing, radius, shadow. Lost = red, Found = amber, shelter/recovery = green, applied consistently on cards, pins, and alerts. |
-| UI primitives | `mobile/src/components/ui/index.tsx` | `Screen`, `Card`, `Button`, `Field`, `Select`, `Choice`, `Segmented`, `Sheet`, `Badge`, `StatTile`, `EmptyState`, `Banner`, `ScoreBar`, `AnimalPhoto`. |
+| UI primitives | `mobile/src/components/ui/index.tsx` | `Screen`, `Card`, `Button`, `Field`, `Select`, `Choice`, `Segmented`, `Sheet`, `Badge`, `EmptyState`, `Banner`, `ScoreBar`, `AnimalPhoto`. |
 | Domain components | `mobile/src/components/domain/index.tsx` | `ReportCard`, `MatchCard`, `ShelterCard`, `ShelterAnimalCard`, `NotificationRow`, case-status pills, `describeAnimal`, `timeAgo`. |
 | Map | `mobile/src/components/map/MapCanvas.tsx` | Pan/zoom OpenStreetMap tile map with typed markers and a radius circle. No API key, no native module, works on web. |
 | State | `shared/src/store/AppStore.tsx` | Every entity and every mutation either surface performs. The single seam for the REST API. |

@@ -10,21 +10,33 @@
     "web"
   ],
   "scripts": {
-    "dev:backend": "npm --workspace backend run dev",
     "dev:mobile": "npm --workspace mobile run start",
     "dev:console": "npm --workspace web run dev",
     "web:mobile": "npm --workspace mobile run web",
-    "lint": "npm --workspace backend run lint",
+    "dev:backend": "npm --workspace backend run dev",
+    "build": "npm run build:console && npm run build:mobile",
+    "build:console": "npm --workspace web run build",
+    "build:mobile": "npm --workspace mobile run build:web",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
     "typecheck": "npm --workspace shared run typecheck && npm --workspace mobile run typecheck && npm --workspace web run typecheck",
     "test": "npm --workspace backend run test"
   },
-  "//overrides": "Many Expo/React Navigation packages accept a wide react-native peer range, so npm hoists the newest release to the repo root while the workspace pins the Expo SDK 54 version. Metro then resolves the hoisted copy and fails on changed package exports. Pinning here keeps exactly one react-native/react in the tree.",
+  "//overrides": "Several packages accept wide peer ranges, so npm hoists a newer release to the repo root while the workspace pins the Expo SDK 54 version. Metro then resolves the hoisted copy and fails on changed package exports. expo-font is here because @expo/vector-icons floats to 15.1.x, which wants expo-font 57 while SDK 54 ships 14 - two copies of a native module breaks Android builds. Pinning keeps exactly one of each in the tree.",
   "overrides": {
     "react-native": "0.81.5",
     "react": "19.1.0",
-    "react-dom": "19.1.0"
+    "react-dom": "19.1.0",
+    "expo-font": "14.0.12"
   },
   "engines": {
     "node": ">=20"
+  },
+  "devDependencies": {
+    "eslint": "^9.39.5",
+    "eslint-config-expo": "^10.0.0",
+    "eslint-plugin-react-hooks": "^5.2.0",
+    "globals": "^17.12.0",
+    "typescript-eslint": "^8.69.0"
   }
 }

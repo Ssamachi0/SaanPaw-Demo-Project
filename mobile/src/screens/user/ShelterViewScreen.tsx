@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { theme } from '@/constants/theme';
 import { distanceMeters, formatDistance, useApp } from '@saanpaw/shared';
 import type { Shelter } from '@saanpaw/shared';
@@ -22,7 +21,7 @@ import {
 import { CaseStatusPill, ShelterCard, timeAgo } from '@/components/domain';
 
 /** User Module - Browse shelters, see the animals they hold, and message them. */
-export function ShelterViewScreen({ navigation }: NativeStackScreenProps<any>) {
+export function ShelterViewScreen() {
   const {
     shelters,
     shelterAnimals,

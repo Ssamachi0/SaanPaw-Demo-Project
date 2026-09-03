@@ -1,7 +1,6 @@
 import { useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import type { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
 import { theme, reportKindStyle } from '@/constants/theme';
 import { distanceMeters, formatDistance, useApp } from '@saanpaw/shared';
 import { Badge, Caption, Card, Choice, Row, SectionHeader } from '@/components/ui';
@@ -14,7 +13,7 @@ type Filter = 'all' | 'lost' | 'found' | 'shelters';
  * User Module - Map View.
  * Reports plotted across the city. The translucent circle is the alert radius.
  */
-export function MapViewScreen({ navigation }: BottomTabScreenProps<any>) {
+export function MapViewScreen() {
   const { reports, shelters, currentUser } = useApp();
   const [filter, setFilter] = useState<Filter>('all');
   const [selected, setSelected] = useState<string | null>(null);
