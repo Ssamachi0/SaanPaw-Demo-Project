@@ -1,0 +1,42 @@
+{
+  "expo": {
+    "name": "SaanPaw",
+    "slug": "saanpaw",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "scheme": "saanpaw",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "web": {
+      "bundler": "metro",
+      "output": "single"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "SaanPaw uses your location to tag reports and show nearby lost or found animals within San Jose Del Monte.",
+        "NSCameraUsageDescription": "SaanPaw uses the camera to photograph lost or found animals for image recognition matching.",
+        "NSPhotoLibraryUsageDescription": "SaanPaw needs photo access to attach animal images to your reports."
+      }
+    },
+    "android": {
+      "package": "ph.sjdm.saanpaw",
+      "permissions": [
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "CAMERA",
+        "READ_MEDIA_IMAGES"
+      ]
+    },
+    "plugins": [
+      "expo-location",
+      "expo-image-picker",
+      "expo-notifications",
+      "expo-secure-store",
+      "expo-font"
+    ]
+  }
+}

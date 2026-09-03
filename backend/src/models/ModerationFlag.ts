@@ -1,0 +1,26 @@
+import { Schema, model, InferSchemaType } from 'mongoose';
+
+/**
+ * Report Monitoring: an AI check flags reports that look false / inappropriate.
+ * The Developer reviews flags and may remove reports or ban repeat offenders.
+ */
+const moderationFlagSchema = new Schema(
+  {
+    reportType: { type: String, enum: ['lost', 'found'], required: true },
+    reportId: { type: Schema.Types.ObjectId, required: true, index: true },
+    reporterId: { type: Schema.Types.ObjectId, ref: 'User', required: true, index: true },
+    reason: {
+      type: String,
+      enum: ['ai_false_positive', 'inappropriate', 'duplicate', 'manual'],
+      required: true,
+    },
+    aiConfidence: { type: Number },
+    status: { type: String, enum: ['open', 'dismissed', 'actioned'], default: 'open', index: true },
+    resolvedBy: { type: Schema.Types.ObjectId, ref: 'DeveloperAccount' },
+    resolutionNote: { type: String },
+  },
+  { timestamps: true },
+);
+
+export type ModerationFlagDoc = InferSchemaType<typeof moderationFlagSchema>;
+export const ModerationFlag = model('ModerationFlag', moderationFlagSchema);

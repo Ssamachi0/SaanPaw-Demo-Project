@@ -1,0 +1,16 @@
+{
+  "name": "saanpaw-ir-spike",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Timeboxed spike: does a pre-trained image embedding separate same-animal photo pairs from different-animal pairs well enough to drive SaanPaw's matching?",
+  "scripts": {
+    "demo-images": "node make-demo-images.mjs",
+    "spike": "node run-spike.mjs"
+  },
+  "dependencies": {
+    "@tensorflow-models/mobilenet": "^2.1.1",
+    "@tensorflow/tfjs": "^4.22.0",
+    "sharp": "^0.33.5"
+  }
+}

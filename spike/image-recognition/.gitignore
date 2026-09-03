@@ -1,0 +1,8 @@
+node_modules/
+results/
+results-demo/
+demo-images/
+
+# Real pet photos: keep them out of the repo. They are other people's
+# property, they bloat the history, and the spike only needs them locally.
+images/

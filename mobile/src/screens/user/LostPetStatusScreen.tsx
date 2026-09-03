@@ -1,0 +1,186 @@
+import { useState } from 'react';
+import { StyleSheet, Text, View } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import type { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { theme } from '@/constants/theme';
+import {
+  Badge,
+  Banner,
+  Button,
+  Card,
+  Caption,
+  Choice,
+  EmptyState,
+  Row,
+  Screen,
+  SectionHeader,
+  Sheet,
+} from '@/components/ui';
+import { ReportCard, timeAgo } from '@/components/domain';
+import { caseStatusMeta, useApp } from '@saanpaw/shared';
+import type { AnimalReport, ReportStatus } from '@saanpaw/shared';
+
+/**
+ * User Module - Update the status of your own reports.
+ * The shelter case timeline is shown underneath so the owner can follow a
+ * rescue without leaving the screen.
+ */
+export function LostPetStatusScreen({ navigation }: NativeStackScreenProps<any>) {
+  const { myReports, setReportStatus, deleteReport, caseForReport, matchesForReport } = useApp();
+  const [editing, setEditing] = useState<AnimalReport | null>(null);
+  const [draftStatus, setDraftStatus] = useState<ReportStatus>('active');
+
+  const openEditor = (report: AnimalReport) => {
+    setEditing(report);
+    setDraftStatus(report.status);
+  };
+
+  const apply = () => {
+    if (editing) setReportStatus(editing.id, draftStatus);
+    setEditing(null);
+  };
+
+  if (!myReports.length) {
+    return (
+      <Screen>
+        <EmptyState
+          icon="clipboard-outline"
+          title="You have not reported anything yet"
+          message="Reports you submit - both lost pets and strays you found - are listed here so you can update their status."
+          action="Report a lost pet"
+          onAction={() => navigation.navigate('ReportLostPet')}
+        />
+      </Screen>
+    );
+  }
+
+  return (
+    <Screen>
+      <Banner
+        tone="info"
+        icon="information-circle"
+        title="Keep your reports up to date"
+        message="Marking a pet as recovered removes it from nearby alerts and closes the shelter's case, keeping the map accurate for everyone."
+      />
+
+      <SectionHeader title={`My reports (${myReports.length})`} />
+
+      {myReports.map((report) => {
+        const linkedCase = caseForReport(report.id);
+        const matchCount = matchesForReport(report.id).length;
+
+        return (
+          <ReportCard
+            key={report.id}
+            report={report}
+            footer={
+              <View style={{ gap: theme.spacing(1) }}>
+                {matchCount ? (
+                  <Row gap={0.5}>
+                    <Ionicons name="sparkles" size={13} color={theme.colors.accent} />
+                    <Text style={styles.matchLine}>
+                      {matchCount} possible {matchCount === 1 ? 'match' : 'matches'} found
+                    </Text>
+                  </Row>
+                ) : null}
+
+                {linkedCase ? (
+                  <View style={styles.timeline}>
+                    <Row gap={0.75}>
+                      <Ionicons name="git-commit-outline" size={14} color={theme.colors.info} />
+                      <Text style={styles.timelineHeading}>Shelter case</Text>
+                      <Badge
+                        label={caseStatusMeta[linkedCase.status].label}
+                        color={caseStatusMeta[linkedCase.status].color}
+                        soft={caseStatusMeta[linkedCase.status].soft}
+                      />
+                    </Row>
+                    {linkedCase.timeline.map((t, i) => (
+                      <View key={i} style={styles.timelineRow}>
+                        <View style={styles.timelineDot} />
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.timelineNote}>{t.note}</Text>
+                          <Caption>
+                            {t.by} · {timeAgo(t.at)}
+                          </Caption>
+                        </View>
+                      </View>
+                    ))}
+                  </View>
+                ) : null}
+
+                <Row gap={1}>
+                  <Button
+                    label="Update status"
+                    variant="secondary"
+                    icon="create-outline"
+                    full={false}
+                    style={{ flex: 1 }}
+                    onPress={() => openEditor(report)}
+                  />
+                  {matchCount ? (
+                    <Button
+                      label="View matches"
+                      variant="primary"
+                      icon="sparkles"
+                      full={false}
+                      style={{ flex: 1 }}
+                      onPress={() => navigation.navigate('ImageRecognition', { reportId: report.id })}
+                    />
+                  ) : null}
+                </Row>
+              </View>
+            }
+          />
+        );
+      })}
+
+      <Sheet open={Boolean(editing)} onClose={() => setEditing(null)} title="Update report status">
+        <Caption>
+          {editing?.name ?? 'This report'} · reported {editing ? timeAgo(editing.reportedAt) : ''}
+        </Caption>
+        <Choice
+          options={[
+            { label: 'Still missing', value: 'active' },
+            { label: 'Possible match', value: 'matched' },
+            { label: 'Recovered', value: 'recovered' },
+            { label: 'Closed', value: 'closed' },
+          ]}
+          value={draftStatus}
+          onChange={(v) => setDraftStatus(v as ReportStatus)}
+          hint="Recovered notifies the shelters that responded and clears the report from nearby alerts."
+        />
+        <Button label="Save status" onPress={apply} icon="checkmark" />
+        <Button
+          label="Delete this report"
+          variant="danger"
+          icon="trash-outline"
+          onPress={() => {
+            if (editing) deleteReport(editing.id);
+            setEditing(null);
+          }}
+        />
+      </Sheet>
+    </Screen>
+  );
+}
+
+const styles = StyleSheet.create({
+  matchLine: { fontSize: 12.5, fontWeight: '700', color: theme.colors.accent },
+  timeline: {
+    backgroundColor: theme.colors.infoSoft,
+    borderRadius: theme.radius.sm,
+    padding: theme.spacing(1.25),
+    gap: 8,
+  },
+  timelineHeading: { flex: 1, fontSize: 12.5, fontWeight: '700', color: theme.colors.info },
+  timelineRow: { flexDirection: 'row', gap: 8, alignItems: 'flex-start' },
+  timelineDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+    backgroundColor: theme.colors.info,
+    marginTop: 5,
+  },
+  timelineNote: { fontSize: 12.5, lineHeight: 18, color: theme.colors.textSoft },
+});

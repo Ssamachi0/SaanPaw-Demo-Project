@@ -1,0 +1,44 @@
+# dependencies
+node_modules/
+.pnp/
+.pnp.js
+
+# env
+.env
+.env.local
+*.local
+
+# builds
+dist/
+build/
+web-build/
+site/
+*.tsbuildinfo
+
+# expo
+.expo/
+.expo-shared/
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+*.orig.*
+
+# logs
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+logs/
+*.log
+
+# editor / os
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db
+
+# uploads / local storage
+backend/uploads/
+coverage/
