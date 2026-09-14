@@ -5,7 +5,7 @@ Local Shelter Integration, and Geolocation for both Lost Pets and Stray Recovery
 for San Jose Del Monte, Bulacan.**
 
 Capstone Project — BS Information Technology, STI San Jose Del Monte.
-Proponents: Justin F. Roque, Mark Kenneth B. Pena, Dirk Louisse R. Villaflor,
+Proponents: Mark Kenneth B. Pena, Dirk Louisse R. Villaflor,
 Mark Gabriel I. Yoldi.
 
 ---
