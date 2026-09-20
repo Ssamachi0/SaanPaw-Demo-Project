@@ -18,7 +18,15 @@ export function createApp() {
   app.use(morgan(env.nodeEnv === 'development' ? 'dev' : 'combined'));
   app.use(rateLimit({ windowMs: 60_000, max: 120 }));
 
-  app.use('/uploads', express.static(path.resolve(env.uploadDir)));
+  // Helmet's default same-origin policy would stop the web apps, on other ports, from showing these photos.
+  app.use(
+    '/uploads',
+    (_req, res, next) => {
+      res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+      next();
+    },
+    express.static(path.resolve(env.uploadDir)),
+  );
   app.use('/api/v1', api);
 
   app.use(notFoundHandler);

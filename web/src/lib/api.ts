@@ -1,10 +1,10 @@
 /// <reference types="vite/client" />
 
-import { errorText } from '@saanpaw/shared';
+import { errorText, networkErrorMessage, resolveApiBase } from '@saanpaw/shared';
 
 const DEFAULT_API_BASE = 'http://localhost:4001/api/v1';
 
-export const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? DEFAULT_API_BASE).replace(/\/+$/, '');
+export const API_BASE_URL = resolveApiBase(import.meta.env.VITE_API_BASE_URL ?? DEFAULT_API_BASE, window.location.hostname);
 
 export async function apiRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
   const url = `${API_BASE_URL}${path.startsWith('/') ? path : `/${path}`}`;
@@ -14,7 +14,12 @@ export async function apiRequest<T>(path: string, init: RequestInit = {}): Promi
     headers.set('Content-Type', 'application/json');
   }
 
-  const response = await fetch(url, { ...init, headers });
+  let response: Response;
+  try {
+    response = await fetch(url, { ...init, headers });
+  } catch {
+    throw new Error(networkErrorMessage(API_BASE_URL));
+  }
   const contentType = response.headers.get('content-type') ?? '';
   const payload = contentType.includes('application/json') ? await response.json() : await response.text();
 

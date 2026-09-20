@@ -37,6 +37,23 @@ export class ApiRequestError extends Error {
   }
 }
 
+const isLanIpv4 = (host: string) => /^\d{1,3}(\.\d{1,3}){3}$/.test(host) && !host.startsWith('127.') && host !== '0.0.0.0';
+
+/**
+ * A `localhost` API address only works on the machine running the server. When the app itself
+ * was opened from a LAN address (a phone, or another PC), aim at that same machine instead.
+ * Any other configured address is used as given.
+ */
+export function resolveApiBase(configured: string, appHost?: string): string {
+  const base = configured.replace(/\/+$/, '');
+  const local = base.match(/^(https?:\/\/)(localhost|127\.0\.0\.1)(?=[:/]|$)/);
+  return local && appHost && isLanIpv4(appHost) ? base.replace(local[0], `${local[1]}${appHost}`) : base;
+}
+
+/** Shown when the request never got an answer, which is what browsers call "Failed to fetch". */
+export const networkErrorMessage = (baseUrl: string) =>
+  `Cannot reach the SaanPaw server at ${baseUrl}. Check that the backend is running and that this device can reach it.`;
+
 /** The backend's error middleware answers `{ error: string }`. */
 export function errorText(payload: unknown, status: number): string {
   if (typeof payload === 'object' && payload !== null) {
@@ -53,17 +70,19 @@ async function call<T>(
   init: { method?: string; body?: unknown } = {},
 ): Promise<T> {
   const headers: Record<string, string> = { Authorization: `Bearer ${session.token}` };
-  if (init.body !== undefined) headers['Content-Type'] = 'application/json';
+  // A FormData body sets its own multipart Content-Type, boundary included.
+  const isForm = typeof FormData !== 'undefined' && init.body instanceof FormData;
+  if (init.body !== undefined && !isForm) headers['Content-Type'] = 'application/json';
 
   let response: Response;
   try {
     response = await fetch(`${session.baseUrl}${path}`, {
       method: init.method ?? 'GET',
       headers,
-      body: init.body === undefined ? undefined : JSON.stringify(init.body),
+      body: init.body === undefined ? undefined : isForm ? (init.body as FormData) : JSON.stringify(init.body),
     });
   } catch {
-    throw new ApiRequestError('Cannot reach the SaanPaw server. Check your connection and try again.', 0);
+    throw new ApiRequestError(networkErrorMessage(session.baseUrl), 0);
   }
 
   const isJson = (response.headers.get('content-type') ?? '').includes('application/json');
@@ -75,6 +94,41 @@ async function call<T>(
   }
   return payload as T;
 }
+
+/** Photos are stored as `/uploads/<file>` paths, so any host that reaches the API can show them. */
+const UPLOAD_PREFIX = '/uploads/';
+
+/** `http://host:4001/api/v1` -> `http://host:4001`. A regex, because React Native's URL has no `origin`. */
+const originOf = (baseUrl: string) => baseUrl.match(/^https?:\/\/[^/]+/)?.[0] ?? baseUrl;
+
+export const resolveImageUrl = (url: string, baseUrl: string) =>
+  url.startsWith(UPLOAD_PREFIX) ? `${originOf(baseUrl)}${url}` : url;
+
+const withImageHosts = <T extends { imageUrls: string[] }>(baseUrl: string, items: T[]): T[] =>
+  items.map((item) => ({ ...item, imageUrls: item.imageUrls.map((u) => resolveImageUrl(u, baseUrl)) }));
+
+/** A photo still on the device (file, content, blob or data URI) rather than one the server can already serve. */
+export const isLocalImageUri = (uri: string) => !/^https?:\/\//.test(uri) && !uri.startsWith(UPLOAD_PREFIX);
+
+const guessMime = (uri: string) => (/\.png(\?|$)/i.test(uri) ? 'image/png' : /\.webp(\?|$)/i.test(uri) ? 'image/webp' : 'image/jpeg');
+
+/** Sends one photo and returns its `/uploads/...` path. */
+export async function uploadImage(s: ApiSession, uri: string): Promise<string> {
+  const form = new FormData();
+  if (typeof navigator !== 'undefined' && navigator.product === 'ReactNative') {
+    // React Native reads the file itself from this descriptor.
+    form.append('photo', { uri, name: 'photo', type: guessMime(uri) } as unknown as Blob);
+  } else {
+    const blob = await (await fetch(uri)).blob();
+    form.append('photo', blob, 'photo');
+  }
+  const { url } = await call<{ url: string }>(s, '/uploads', { method: 'POST', body: form });
+  return url;
+}
+
+/** Uploads whatever is still local and leaves already-hosted photos alone. */
+export const uploadPending = (s: ApiSession, uris: string[]) =>
+  Promise.all(uris.map((uri) => (isLocalImageUri(uri) ? uploadImage(s, uri) : uri)));
 
 interface ReportsEnvelope {
   lost: AnimalReport[];
@@ -144,9 +198,9 @@ export async function loadSnapshot(s: ApiSession): Promise<Snapshot> {
       ...emptySnapshot(me.id),
       users: [me],
       shelters,
-      reports: [...reports.values()],
+      reports: withImageHosts(s.baseUrl, [...reports.values()]),
       matches: matches.flat(),
-      shelterAnimals: animals.flat(),
+      shelterAnimals: withImageHosts(s.baseUrl, animals.flat()),
       notifications,
       stats,
     };
@@ -164,8 +218,8 @@ export async function loadSnapshot(s: ApiSession): Promise<Snapshot> {
     return {
       ...emptySnapshot(me.id),
       shelters: [me],
-      reports: flatten(reports),
-      shelterAnimals: animals,
+      reports: withImageHosts(s.baseUrl, flatten(reports)),
+      shelterAnimals: withImageHosts(s.baseUrl, animals),
       cases,
       notifications,
       stats: {
@@ -183,7 +237,7 @@ export async function loadSnapshot(s: ApiSession): Promise<Snapshot> {
     reports: AnimalReport[];
     flags: ModerationFlag[];
   }>(s, '/developer/overview');
-  return { ...emptySnapshot(''), ...overview };
+  return { ...emptySnapshot(''), ...overview, reports: withImageHosts(s.baseUrl, overview.reports) };
 }
 
 /** Field names the report endpoints read from the request body. */
@@ -204,8 +258,12 @@ export interface ReportPayload {
 const notificationsBase = (role: Role) => (role === 'shelter_admin' ? '/shelter' : '/user');
 
 export const apiActions = {
-  createReport: (s: ApiSession, kind: ReportKind, body: ReportPayload) =>
-    call<AnimalReport>(s, `/user/reports/${kind}`, { method: 'POST', body }),
+  /** Uploads any photos still on the device first, so the report only ever holds hosted photos. */
+  createReport: async (s: ApiSession, kind: ReportKind, body: ReportPayload) => {
+    const imageUrls = await uploadPending(s, body.imageUrls);
+    const created = await call<AnimalReport>(s, `/user/reports/${kind}`, { method: 'POST', body: { ...body, imageUrls } });
+    return withImageHosts(s.baseUrl, [created])[0];
+  },
 
   setReportStatus: (s: ApiSession, kind: ReportKind, id: string, status: ReportStatus) =>
     call<AnimalReport>(s, `/user/reports/${kind}/${id}/status`, { method: 'PATCH', body: { status } }),
@@ -230,8 +288,11 @@ export const apiActions = {
   setCaseStatus: (s: ApiSession, caseId: string, status: AnimalCaseStatus, notes: string) =>
     call<AnimalCase>(s, `/shelter/cases/${caseId}/status`, { method: 'PATCH', body: { status, notes } }),
 
-  addShelterAnimal: (s: ApiSession, body: Omit<ShelterAnimal, 'id' | 'shelterId'>) =>
-    call<ShelterAnimal>(s, '/shelter/animals', { method: 'POST', body }),
+  addShelterAnimal: async (s: ApiSession, body: Omit<ShelterAnimal, 'id' | 'shelterId'>) => {
+    const imageUrls = await uploadPending(s, body.imageUrls);
+    const created = await call<ShelterAnimal>(s, '/shelter/animals', { method: 'POST', body: { ...body, imageUrls } });
+    return withImageHosts(s.baseUrl, [created])[0];
+  },
 
   updateShelterAnimal: (
     s: ApiSession,

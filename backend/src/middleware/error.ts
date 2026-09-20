@@ -1,4 +1,5 @@
 import type { NextFunction, Request, Response } from 'express';
+import multer from 'multer';
 import { ApiError } from '../utils/ApiError';
 import { logger } from '../utils/logger';
 
@@ -6,6 +7,14 @@ import { logger } from '../utils/logger';
 export function errorHandler(err: unknown, _req: Request, res: Response, _next: NextFunction): void {
   if (err instanceof ApiError) {
     res.status(err.statusCode).json({ error: err.message, details: err.details ?? null });
+    return;
+  }
+  if (err instanceof multer.MulterError) {
+    const tooBig = err.code === 'LIMIT_FILE_SIZE';
+    res.status(tooBig ? 413 : 400).json({
+      error: tooBig ? 'That photo is too large. The limit is 8 MB.' : 'The photo upload was rejected.',
+      details: null,
+    });
     return;
   }
   logger.error(err);
