@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useMemo, useState, type ReactNode
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { Role } from '@saanpaw/shared';
 import { apiRequest } from '../services/api';
+import { tokenStorage } from '../services/tokenStorage';
 
 const SESSION_KEY = 'saanpaw.session';
 const TOKEN_KEY = 'saanpaw.token';
@@ -40,7 +41,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    Promise.all([AsyncStorage.getItem(SESSION_KEY), AsyncStorage.getItem(TOKEN_KEY)])
+    Promise.all([AsyncStorage.getItem(SESSION_KEY), tokenStorage.get(TOKEN_KEY)])
       .then(([stored, storedToken]) => {
         // A session without a token (from before sign-in used the API) cannot call the server,
         // except in demo mode where there is no server.
@@ -77,13 +78,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         });
 
         await AsyncStorage.setItem(SESSION_KEY, r);
-        await AsyncStorage.setItem(TOKEN_KEY, response.token);
+        await tokenStorage.set(TOKEN_KEY, response.token);
         setToken(response.token);
         setRole(r);
       },
       signOut: async () => {
         await AsyncStorage.removeItem(SESSION_KEY);
-        await AsyncStorage.removeItem(TOKEN_KEY);
+        await tokenStorage.remove(TOKEN_KEY);
         setToken(null);
         setRole(null);
       },

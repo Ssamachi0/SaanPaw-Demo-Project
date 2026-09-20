@@ -1,0 +1,12 @@
+**/node_modules
+**/dist
+**/.expo
+**/web-build
+.git
+.github
+docs
+**/.env
+**/.env.*
+!**/.env.example
+backend/uploads
+mobile/assets

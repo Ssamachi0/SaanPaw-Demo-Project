@@ -17,6 +17,7 @@
     "build": "npm run build:console && npm run build:mobile",
     "build:console": "npm --workspace web run build",
     "build:mobile": "npm --workspace mobile run build:web",
+    "build:backend": "npm --workspace backend run build",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "typecheck": "npm --workspace shared run typecheck && npm --workspace mobile run typecheck && npm --workspace web run typecheck",

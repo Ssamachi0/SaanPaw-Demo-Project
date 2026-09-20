@@ -11,6 +11,10 @@ import { SJDM_CENTER } from '../config/serviceArea';
 import { logger } from '../utils/logger';
 
 async function seed() {
+  // The demo accounts share a published password, so they must never reach a real database.
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('Refusing to seed demo accounts in production. Use `npm run create-admin` instead.');
+  }
   await connectDatabase();
   const pass = await bcrypt.hash('saanpaw123', 10);
   const center: [number, number] = [SJDM_CENTER.longitude, SJDM_CENTER.latitude];

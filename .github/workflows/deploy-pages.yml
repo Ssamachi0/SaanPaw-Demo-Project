@@ -46,6 +46,7 @@ jobs:
         working-directory: web
         env:
           VITE_DEMO_MODE: '1'
+          VITE_BASE_PATH: /SaanPaw-Demo-Project/console/
         run: npx vite build
 
       - name: Export mobile app for web

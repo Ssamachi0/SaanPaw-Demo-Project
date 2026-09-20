@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import mongoose from 'mongoose';
 import authRoutes from '../modules/auth/auth.routes';
 import developerRoutes from '../modules/developer/developer.routes';
 import shelterRoutes from '../modules/shelter/shelter.routes';
@@ -7,7 +8,11 @@ import userRoutes from '../modules/user/user.routes';
 
 const api = Router();
 
-api.get('/health', (_req, res) => res.json({ status: 'ok', service: 'saanpaw-api' }));
+// Load balancers and container platforms poll this: 503 while the database is unreachable takes the instance out of rotation.
+api.get('/health', (_req, res) => {
+  const database = mongoose.connection.readyState === 1;
+  res.status(database ? 200 : 503).json({ status: database ? 'ok' : 'degraded', service: 'saanpaw-api', database });
+});
 api.use('/auth', authRoutes);
 api.use('/developer', developerRoutes);
 api.use('/shelter', shelterRoutes);

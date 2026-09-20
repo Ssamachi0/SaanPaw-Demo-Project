@@ -21,7 +21,8 @@
         "NSLocationWhenInUseUsageDescription": "SaanPaw uses your location to tag reports and show nearby lost or found animals within San Jose Del Monte.",
         "NSCameraUsageDescription": "SaanPaw uses the camera to photograph lost or found animals for image recognition matching.",
         "NSPhotoLibraryUsageDescription": "SaanPaw needs photo access to attach animal images to your reports."
-      }
+      },
+      "bundleIdentifier": "ph.sjdm.saanpaw"
     },
     "android": {
       "package": "ph.sjdm.saanpaw",

@@ -1,0 +1,46 @@
+name: CI
+
+# Runs on every pull request and every push to main. The Pages workflow only builds the
+# demo, so this is what checks the backend and the container image.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: Typecheck, build and test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck shared, mobile and web
+        run: npm run typecheck
+
+      - name: Build the backend
+        run: npm run build --workspace backend
+
+      - name: Test the backend
+        run: npm test --workspace backend
+
+  docker:
+    name: Backend image builds
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the image
+        run: docker build -f backend/Dockerfile -t saanpaw-api .
