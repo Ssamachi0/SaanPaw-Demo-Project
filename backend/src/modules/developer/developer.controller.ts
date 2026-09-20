@@ -5,6 +5,10 @@ export const developerController = {
   dashboard: async (_req: Request, res: Response) =>
     res.json(await developerService.getDashboard()),
 
+  overview: async (_req: Request, res: Response) => res.json(await developerService.overview()),
+
+  banUser: async (req: Request, res: Response) => res.json(await developerService.banUser(req.params.id)),
+
   listPendingShelters: async (_req: Request, res: Response) =>
     res.json(await developerService.listPendingShelters()),
 

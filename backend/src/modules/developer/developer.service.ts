@@ -1,29 +1,68 @@
 import bcrypt from 'bcryptjs';
+import crypto from 'crypto';
 import { Shelter } from '../../models/Shelter';
+import { User } from '../../models/User';
 import { LostPetReport } from '../../models/LostPetReport';
 import { FoundAnimalReport } from '../../models/FoundAnimalReport';
 import { ModerationFlag } from '../../models/ModerationFlag';
 import { moderationService } from '../../services/moderation.service';
+import { statsService } from '../../services/stats.service';
 import { ApiError } from '../../utils/ApiError';
+import {
+  serializeFlag,
+  serializeFoundReport,
+  serializeLostReport,
+  serializeShelter,
+  serializeUser,
+} from '../../utils/geoHelpers';
+
+const OVERVIEW_LIMIT = 500;
 
 export const developerService = {
   /** Dashboard: daily lost/found stats + pending queues. */
   async getDashboard() {
-    const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
-    const [lostToday, foundToday, pendingShelters, openFlags] = await Promise.all([
-      LostPetReport.countDocuments({ reportedAt: { $gte: since } }),
-      FoundAnimalReport.countDocuments({ reportedAt: { $gte: since } }),
+    const [stats, pendingShelters, openFlags] = await Promise.all([
+      statsService.platformStats(),
       Shelter.countDocuments({ approvalStatus: 'pending' }),
       ModerationFlag.countDocuments({ status: 'open' }),
     ]);
-    return { lostToday, foundToday, pendingShelters, openFlags };
+    return { ...stats, pendingShelters, openFlags };
+  },
+
+  /** Everything the console renders, in the shapes the shared types describe. */
+  async overview() {
+    const [stats, shelters, users, lost, found, flags] = await Promise.all([
+      statsService.platformStats(),
+      Shelter.find().sort({ registeredAt: -1 }).lean(),
+      User.find().sort({ joinedAt: -1 }).limit(OVERVIEW_LIMIT).lean(),
+      LostPetReport.find().sort({ reportedAt: -1 }).limit(OVERVIEW_LIMIT).lean(),
+      FoundAnimalReport.find().sort({ reportedAt: -1 }).limit(OVERVIEW_LIMIT).lean(),
+      ModerationFlag.find().sort({ createdAt: -1 }).limit(OVERVIEW_LIMIT).lean(),
+    ]);
+
+    const userById = new Map(users.map((u) => [String(u._id), u]));
+    return {
+      stats,
+      shelters: shelters.map(serializeShelter),
+      users: users.map(serializeUser),
+      reports: [...lost.map(serializeLostReport), ...found.map(serializeFoundReport)],
+      flags: flags.map((f) => {
+        const reporter = userById.get(String(f.reporterId));
+        return serializeFlag(f, reporter?.fullName ?? 'Unknown user', Boolean(reporter?.isBanned));
+      }),
+    };
   },
 
   // ----- Shelter Approval Management -----
-  listPendingShelters() {
-    return Shelter.find({ approvalStatus: 'pending' }).sort({ createdAt: 1 }).lean();
+  async listPendingShelters() {
+    const shelters = await Shelter.find({ approvalStatus: 'pending' }).sort({ createdAt: 1 }).lean();
+    return shelters.map(serializeShelter);
   },
 
+  /**
+   * Approving issues the shelter's login. When the developer does not pick credentials,
+   * the shelter's contact email is used and a one-time password is generated and returned.
+   */
   async reviewShelter(params: {
     shelterId: string;
     developerId: string;
@@ -39,18 +78,22 @@ export const developerService = {
       shelter.approvalStatus = 'rejected';
       shelter.rejectionReason = params.reason;
       await shelter.save();
-      return shelter;
+      return { shelter: serializeShelter(shelter) };
     }
 
-    if (!params.adminEmail || !params.temporaryPassword) {
-      throw ApiError.badRequest('adminEmail and temporaryPassword are required to approve');
+    const adminEmail = (params.adminEmail ?? shelter.email)?.toLowerCase().trim();
+    if (!adminEmail) {
+      throw ApiError.badRequest('adminEmail is required: this shelter has no contact email on file');
     }
+    const generated = params.temporaryPassword ? undefined : crypto.randomBytes(6).toString('base64url');
+    const password = params.temporaryPassword ?? generated!;
+
     shelter.approvalStatus = 'approved';
     shelter.approvedBy = params.developerId as never;
-    shelter.adminEmail = params.adminEmail.toLowerCase().trim();
-    shelter.adminPasswordHash = await bcrypt.hash(params.temporaryPassword, 10);
+    shelter.adminEmail = adminEmail;
+    shelter.adminPasswordHash = await bcrypt.hash(password, 10);
     await shelter.save();
-    return shelter;
+    return { shelter: serializeShelter(shelter), adminEmail, temporaryPassword: generated };
   },
 
   // ----- System Management -----
@@ -64,8 +107,14 @@ export const developerService = {
   },
 
   // ----- Report Monitoring -----
-  listFlags(status: 'open' | 'dismissed' | 'actioned' = 'open') {
-    return ModerationFlag.find({ status }).sort({ createdAt: -1 }).lean();
+  async listFlags(status: 'open' | 'dismissed' | 'actioned' = 'open') {
+    const flags = await ModerationFlag.find({ status }).sort({ createdAt: -1 }).lean();
+    const users = await User.find({ _id: { $in: flags.map((f) => f.reporterId) } }).lean();
+    const userById = new Map(users.map((u) => [String(u._id), u]));
+    return flags.map((f) => {
+      const reporter = userById.get(String(f.reporterId));
+      return serializeFlag(f, reporter?.fullName ?? 'Unknown user', Boolean(reporter?.isBanned));
+    });
   },
 
   async resolveFlag(params: {
@@ -96,6 +145,21 @@ export const developerService = {
         ? await moderationService.escalateReporter(String(flag.reporterId))
         : { banned: false };
 
-    return { flag, escalation };
+    const reporter = await User.findById(flag.reporterId).lean();
+    return {
+      flag: serializeFlag(flag.toObject(), reporter?.fullName ?? 'Unknown user', Boolean(reporter?.isBanned)),
+      escalation,
+    };
+  },
+
+  /** Manual ban: locks the account and hides everything the user reported. */
+  async banUser(userId: string) {
+    const user = await User.findByIdAndUpdate(userId, { isBanned: true }, { new: true });
+    if (!user) throw ApiError.notFound('User not found');
+    await Promise.all([
+      LostPetReport.updateMany({ reporterId: userId }, { isHiddenByModeration: true }),
+      FoundAnimalReport.updateMany({ reporterId: userId }, { isHiddenByModeration: true }),
+    ]);
+    return serializeUser(user);
   },
 };

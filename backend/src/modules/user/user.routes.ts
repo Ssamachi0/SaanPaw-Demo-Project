@@ -11,6 +11,10 @@ router.post('/register', geoFence, asyncHandler(userController.register));
 
 router.use(authenticate, authorize('user'));
 
+router.get('/me', asyncHandler(userController.me));
+router.patch('/profile', geoFence, asyncHandler(userController.updateProfile));
+router.get('/reports/mine', asyncHandler(userController.myReports));
+
 router.get('/dashboard', asyncHandler(userController.dashboard));
 
 // Report Lost Pet + status update
@@ -19,6 +23,8 @@ router.patch('/reports/lost/:id/status', asyncHandler(userController.updateLostR
 
 // Report Found Animal
 router.post('/reports/found', geoFence, asyncHandler(userController.createFoundReport));
+router.patch('/reports/found/:id/status', asyncHandler(userController.updateFoundReportStatus));
+router.delete('/reports/:kind(lost|found)/:id', asyncHandler(userController.deleteReport));
 
 // Shelter View
 router.get('/shelters', asyncHandler(userController.listShelters));

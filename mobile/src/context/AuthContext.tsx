@@ -19,6 +19,8 @@ export const DEMO_ACCOUNTS: Record<MobileRole, { email: string; password: string
 
 interface AuthState {
   role: MobileRole | null;
+  /** Bearer token for the signed-in role, used by the data store. */
+  token: string | null;
   loading: boolean;
   signIn: (role: MobileRole, email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
@@ -28,20 +30,28 @@ const AuthContext = createContext<AuthState | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [role, setRole] = useState<MobileRole | null>(null);
+  const [token, setToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    AsyncStorage.getItem(SESSION_KEY)
-      .then((stored) => {
-        setRole(stored === 'user' || stored === 'shelter_admin' ? stored : null);
+    Promise.all([AsyncStorage.getItem(SESSION_KEY), AsyncStorage.getItem(TOKEN_KEY)])
+      .then(([stored, storedToken]) => {
+        // A session without a token (from before sign-in used the API) cannot call the server.
+        const valid = (stored === 'user' || stored === 'shelter_admin') && storedToken;
+        setRole(valid ? (stored as MobileRole) : null);
+        setToken(valid ? storedToken : null);
       })
-      .catch(() => setRole(null))
+      .catch(() => {
+        setRole(null);
+        setToken(null);
+      })
       .finally(() => setLoading(false));
   }, []);
 
   const value = useMemo<AuthState>(
     () => ({
       role,
+      token,
       loading,
       signIn: async (r, email, password) => {
         const response = await apiRequest<{ token: string }>('/auth/login', {
@@ -51,15 +61,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         await AsyncStorage.setItem(SESSION_KEY, r);
         await AsyncStorage.setItem(TOKEN_KEY, response.token);
+        setToken(response.token);
         setRole(r);
       },
       signOut: async () => {
         await AsyncStorage.removeItem(SESSION_KEY);
         await AsyncStorage.removeItem(TOKEN_KEY);
+        setToken(null);
         setRole(null);
       },
     }),
-    [role, loading],
+    [role, token, loading],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

@@ -1,3 +1,5 @@
+import { errorText } from '@saanpaw/shared';
+
 const DEFAULT_API_BASE = 'http://localhost:4001/api/v1';
 
 export const API_BASE_URL = (process.env.EXPO_PUBLIC_API_URL ?? DEFAULT_API_BASE).replace(/\/+$/, '');
@@ -19,13 +21,7 @@ export async function apiRequest<T>(path: string, init: RequestInit = {}, token?
   const payload = contentType.includes('application/json') ? await response.json() : await response.text();
 
   if (!response.ok) {
-    const message =
-      typeof payload === 'object' && payload !== null && 'message' in payload
-        ? String((payload as { message?: string }).message)
-        : typeof payload === 'string'
-          ? payload
-          : `Request failed (${response.status})`;
-    throw new Error(message);
+    throw new Error(errorText(payload, response.status));
   }
 
   return payload as T;

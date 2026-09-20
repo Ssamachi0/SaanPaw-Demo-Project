@@ -7,6 +7,7 @@ import { Notification } from '../../models/Notification';
 import { MatchSuggestion } from '../../models/MatchSuggestion';
 import { smartAlertService } from '../../services/smartAlert.service';
 import { moderationService } from '../../services/moderation.service';
+import { statsService } from '../../services/stats.service';
 import { geolocationService } from '../../services/geolocation.service';
 import { authService } from '../auth/auth.service';
 import { REPORT_STATUSES } from '../../config/constants';
@@ -49,26 +50,38 @@ export const userService = {
     return serializeUser(user);
   },
 
-  // ----- Dashboard -----
-  async getDashboard() {
-    const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
-    const [lostToday, foundToday, reunitedThisMonth] = await Promise.all([
-      LostPetReport.countDocuments({ reportedAt: { $gte: since } }),
-      FoundAnimalReport.countDocuments({ reportedAt: { $gte: since } }),
-      LostPetReport.countDocuments({ status: 'recovered', updatedAt: { $gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) } }),
+  // ----- Profile -----
+  async getMe(userId: string) {
+    const user = await User.findById(userId).lean();
+    if (!user) throw ApiError.notFound('User not found');
+    return serializeUser(user);
+  },
+
+  async updateProfile(userId: string, patch: Record<string, unknown>) {
+    const update: Record<string, unknown> = {};
+    for (const key of ['fullName', 'phone', 'barangay', 'alertRadiusMeters'] as const) {
+      if (patch[key] !== undefined) update[key] = patch[key];
+    }
+    const loc = patch.location as { latitude?: number; longitude?: number } | undefined;
+    if (loc?.latitude != null && loc.longitude != null) {
+      update.homeLocation = latLngToGeoPoint({ latitude: loc.latitude, longitude: loc.longitude });
+    }
+    const user = await User.findByIdAndUpdate(userId, update, { new: true });
+    if (!user) throw ApiError.notFound('User not found');
+    return serializeUser(user);
+  },
+
+  async listMyReports(userId: string) {
+    const [lost, found] = await Promise.all([
+      LostPetReport.find({ reporterId: userId, isHiddenByModeration: false }).sort({ reportedAt: -1 }).lean(),
+      FoundAnimalReport.find({ reporterId: userId, isHiddenByModeration: false }).sort({ reportedAt: -1 }).lean(),
     ]);
-    
-    const activeReports = await LostPetReport.countDocuments({ status: 'active' });
-    const sheltersOnline = await Shelter.countDocuments({ approvalStatus: 'approved' });
-    
-    return {
-      lostToday,
-      foundToday,
-      activeReports,
-      reunitedThisMonth,
-      underRescue: 0,
-      sheltersOnline,
-    };
+    return { lost: lost.map(serializeLostReport), found: found.map(serializeFoundReport) };
+  },
+
+  // ----- Dashboard -----
+  getDashboard() {
+    return statsService.platformStats();
   },
 
   // ----- Report Lost Pet -----
@@ -114,6 +127,23 @@ export const userService = {
     );
     if (!report) throw ApiError.notFound('Report not found');
     return serializeLostReport(report);
+  },
+
+  async updateFoundReportStatus(reporterId: string, id: string, status: string) {
+    if (!REPORT_STATUSES.includes(status as never)) throw ApiError.badRequest('Invalid status');
+    const report = await FoundAnimalReport.findOneAndUpdate({ _id: id, reporterId }, { status }, { new: true });
+    if (!report) throw ApiError.notFound('Report not found');
+    return serializeFoundReport(report);
+  },
+
+  async deleteReport(reporterId: string, kind: 'lost' | 'found', id: string) {
+    const removed =
+      kind === 'lost'
+        ? await LostPetReport.findOneAndDelete({ _id: id, reporterId })
+        : await FoundAnimalReport.findOneAndDelete({ _id: id, reporterId });
+    if (!removed) throw ApiError.notFound('Report not found');
+    if (kind === 'lost') await MatchSuggestion.deleteMany({ lostReportId: id });
+    return { id };
   },
 
   // ----- Report Found Animal -----

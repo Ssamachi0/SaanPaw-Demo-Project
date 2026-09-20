@@ -159,6 +159,7 @@ export function serializeNotification(doc: any) {
     match: 'match_found',
     status_update: 'case_update',
     message: 'message',
+    moderation: 'system',
   };
 
   return {
@@ -171,5 +172,58 @@ export function serializeNotification(doc: any) {
     createdAt: doc.createdAt?.toISOString?.(),
     distanceMeters: doc.distanceMeters,
     relatedReportId: doc.refId ? String(doc.refId) : undefined,
+  };
+}
+
+export function serializeCase(doc: any, shelterName = 'Shelter') {
+  return {
+    id: String(doc._id),
+    reportId: String(doc.lostReportId ?? doc.foundReportId ?? ''),
+    shelterId: String(doc.shelterId),
+    status: doc.status,
+    openedAt: doc.createdAt?.toISOString?.(),
+    updatedAt: doc.updatedAt?.toISOString?.(),
+    timeline: (doc.history ?? []).map((h: any) => ({
+      at: h.changedAt?.toISOString?.(),
+      status: h.status,
+      note: h.note ?? '',
+      by: shelterName,
+    })),
+  };
+}
+
+const FLAG_REASON_MAP: Record<string, string> = {
+  ai_false_positive: 'suspected_false',
+  inappropriate: 'inappropriate_image',
+  duplicate: 'duplicate',
+  manual: 'spam',
+};
+
+const FLAG_DETAIL: Record<string, string> = {
+  ai_false_positive: 'The AI check found this report looks unlikely to be genuine.',
+  inappropriate: 'The AI check found the attached content may be inappropriate.',
+  duplicate: 'This looks like a duplicate of an existing report.',
+  manual: 'Flagged for manual review.',
+};
+
+export function serializeFlag(doc: any, reporterName: string, reporterBanned: boolean) {
+  const resolution =
+    doc.status === 'dismissed'
+      ? 'dismissed'
+      : doc.status === 'actioned'
+        ? reporterBanned
+          ? 'account_banned'
+          : 'removed'
+        : 'pending';
+  return {
+    id: String(doc._id),
+    reportId: String(doc.reportId),
+    reporterId: String(doc.reporterId),
+    reporterName,
+    reason: FLAG_REASON_MAP[doc.reason] ?? 'spam',
+    confidence: doc.aiConfidence ?? 0,
+    detail: doc.resolutionNote || FLAG_DETAIL[doc.reason] || '',
+    flaggedAt: doc.createdAt?.toISOString?.(),
+    resolution,
   };
 }

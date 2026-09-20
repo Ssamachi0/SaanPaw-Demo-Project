@@ -1,5 +1,15 @@
-import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react';
-import { distanceMeters } from '../sjdm';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
+import { SJDM_BARANGAYS, distanceMeters } from '../sjdm';
+import { apiActions, loadSnapshot, type ApiSession, type Snapshot } from '../api';
 import {
   CURRENT_SHELTER_ID,
   CURRENT_USER_ID,
@@ -35,12 +45,70 @@ import type {
 } from '../types';
 
 /**
- * All app data, held in memory.
+ * All app data.
  *
- * Every action lives here, so reporting a lost pet also alerts nearby shelters
- * and shows up in the developer console. When the API lands, these actions
- * become fetch calls and no screen has to change.
+ * Without a `session` the store runs on the in-memory seed data, so the apps work
+ * with no backend. With a `session` it loads everything for that role from the
+ * API and every action becomes a request. Screens use the same hook either way.
+ *
+ * Live mode updates the screen first, sends the request, then reloads from the
+ * server. A failed request surfaces in `sync.error` and the reload rolls the
+ * screen back to what the server actually holds.
+ *
+ * Messaging has no API yet, so conversations and messages stay local.
  */
+
+const POLL_MS = 30_000;
+
+const errorMessage = (e: unknown) => (e instanceof Error ? e.message : 'Something went wrong.');
+
+const PLACEHOLDER_LOCATION = SJDM_BARANGAYS[0].center;
+
+const PLACEHOLDER_USER: AppUser = {
+  id: '',
+  fullName: '',
+  email: '',
+  phone: '',
+  barangay: SJDM_BARANGAYS[0].name,
+  location: PLACEHOLDER_LOCATION,
+  alertRadiusMeters: 3000,
+  joinedAt: new Date(0).toISOString(),
+  flaggedReportCount: 0,
+  isBanned: false,
+};
+
+const PLACEHOLDER_SHELTER: Shelter = {
+  id: '',
+  name: '',
+  barangay: SJDM_BARANGAYS[0].name,
+  address: '',
+  contactNumber: '',
+  email: '',
+  location: PLACEHOLDER_LOCATION,
+  operatingRadiusMeters: 5000,
+  approvalStatus: 'pending',
+  registeredAt: new Date(0).toISOString(),
+  permitNumber: '',
+  capacity: 0,
+  currentOccupancy: 0,
+  logoColor: '#888888',
+};
+
+export interface SyncState {
+  /** `loading` until the first load finishes; always `ready` on seed data. */
+  status: 'loading' | 'ready' | 'error';
+  /** Latest load or action failure, for the app to show. */
+  error: string | null;
+  clearError: () => void;
+  refresh: () => Promise<void>;
+}
+
+/** Login handed out when a developer approves a shelter, shown once. */
+export interface IssuedLogin {
+  shelterId: string;
+  email: string;
+  password: string;
+}
 
 /**
  * "Daily" means the last 24 hours, matching the backend.
@@ -81,6 +149,10 @@ interface AppState {
   currentUser: AppUser;
   currentShelter: Shelter;
 
+  sync: SyncState;
+  issuedLogin: IssuedLogin | null;
+  clearIssuedLogin: () => void;
+
   // ---- selectors
   stats: DashboardStats;
   reportById: (id: string) => AnimalReport | undefined;
@@ -108,7 +180,8 @@ interface AppState {
   }) => { id: string; source: 'found_report' | 'shelter_animal'; score: number; reasons: string[] }[];
 
   // ---- actions
-  createReport: (input: NewReportInput) => AnimalReport;
+  /** Rejects when the server refuses the report, e.g. a pin outside the service area. */
+  createReport: (input: NewReportInput) => Promise<AnimalReport>;
   setReportStatus: (reportId: string, status: ReportStatus) => void;
   deleteReport: (reportId: string) => void;
   setShelterApproval: (shelterId: string, status: 'approved' | 'rejected') => void;
@@ -129,22 +202,142 @@ interface AppState {
 
 const AppContext = createContext<AppState | undefined>(undefined);
 
-export function AppStoreProvider({ children }: { children: ReactNode }) {
-  const [users, setUsers] = useState<AppUser[]>(seedUsers);
-  const [shelters, setShelters] = useState<Shelter[]>(seedShelters);
-  const [reports, setReports] = useState<AnimalReport[]>(seedReports);
-  const [matches, setMatches] = useState<MatchSuggestion[]>(seedMatches);
-  const [shelterAnimals, setShelterAnimals] = useState<ShelterAnimal[]>(seedShelterAnimals);
-  const [cases, setCases] = useState<AnimalCase[]>(seedCases);
-  const [flags, setFlags] = useState<ModerationFlag[]>(seedFlags);
-  const [notifications, setNotifications] = useState<NotificationItem[]>(seedNotifications);
-  const [conversations, setConversations] = useState<Conversation[]>(seedConversations);
-  const [messages, setMessages] = useState<Message[]>(seedMessages);
+export function AppStoreProvider({ children, session }: { children: ReactNode; session?: ApiSession }) {
+  const live = Boolean(session);
+  const [users, setUsers] = useState<AppUser[]>(live ? [] : seedUsers);
+  const [shelters, setShelters] = useState<Shelter[]>(live ? [] : seedShelters);
+  const [reports, setReports] = useState<AnimalReport[]>(live ? [] : seedReports);
+  const [matches, setMatches] = useState<MatchSuggestion[]>(live ? [] : seedMatches);
+  const [shelterAnimals, setShelterAnimals] = useState<ShelterAnimal[]>(live ? [] : seedShelterAnimals);
+  const [cases, setCases] = useState<AnimalCase[]>(live ? [] : seedCases);
+  const [flags, setFlags] = useState<ModerationFlag[]>(live ? [] : seedFlags);
+  const [notifications, setNotifications] = useState<NotificationItem[]>(live ? [] : seedNotifications);
+  const [conversations, setConversations] = useState<Conversation[]>(live ? [] : seedConversations);
+  const [messages, setMessages] = useState<Message[]>(live ? [] : seedMessages);
 
-  const currentUser = users.find((u) => u.id === CURRENT_USER_ID)!;
-  const currentShelter = shelters.find((s) => s.id === CURRENT_SHELTER_ID)!;
+  const [selfId, setSelfId] = useState('');
+  const [serverStats, setServerStats] = useState<Snapshot['stats']>({});
+  const [status, setStatus] = useState<SyncState['status']>(live ? 'loading' : 'ready');
+  const [error, setError] = useState<string | null>(null);
+  const [issuedLogin, setIssuedLogin] = useState<IssuedLogin | null>(null);
+
+  // Callbacks read the session through a ref so they stay stable across renders.
+  const sessionRef = useRef(session);
+  sessionRef.current = session;
+  const statusRef = useRef(status);
+  statusRef.current = status;
+  const pending = useRef(0);
+
+  const currentUser =
+    users.find((u) => u.id === (live ? (session!.role === 'user' ? selfId : '') : CURRENT_USER_ID)) ??
+    PLACEHOLDER_USER;
+  const currentShelter =
+    shelters.find(
+      (s) => s.id === (live ? (session!.role === 'shelter_admin' ? selfId : '') : CURRENT_SHELTER_ID),
+    ) ?? PLACEHOLDER_SHELTER;
+
+  const applySnapshot = useCallback((snap: Snapshot) => {
+    setSelfId(snap.selfId);
+    setUsers(snap.users);
+    setShelters(snap.shelters);
+    setReports(snap.reports);
+    setShelterAnimals(snap.shelterAnimals);
+    setCases(snap.cases);
+    setFlags(snap.flags);
+    setNotifications(snap.notifications);
+    setServerStats(snap.stats);
+    // The server does not rank matches yet, so keep the ones ranked on this device.
+    setMatches((prev) => {
+      const seen = new Set(snap.matches.map((m) => `${m.lostReportId}:${m.candidateId}`));
+      const local = prev.filter(
+        (m) =>
+          m.id.startsWith('mm') &&
+          !seen.has(`${m.lostReportId}:${m.candidateId}`) &&
+          snap.reports.some((r) => r.id === m.lostReportId),
+      );
+      return [...snap.matches, ...local];
+    });
+  }, []);
+
+  /** Reload from the server. Skipped while a request is in flight so it cannot undo an optimistic edit. */
+  const refresh = useCallback(async () => {
+    const s = sessionRef.current;
+    if (!s || pending.current > 0) return;
+    try {
+      const snap = await loadSnapshot(s);
+      if (sessionRef.current?.token !== s.token || pending.current > 0) return;
+      applySnapshot(snap);
+      // Recovering from a failed first load: the load error no longer applies.
+      if (statusRef.current !== 'ready') setError(null);
+      setStatus('ready');
+    } catch (e) {
+      if (statusRef.current !== 'ready') {
+        setStatus('error');
+        setError(errorMessage(e));
+      }
+    }
+  }, [applySnapshot]);
+
+  useEffect(() => {
+    setError(null);
+    setIssuedLogin(null);
+    if (!session) {
+      setUsers(seedUsers);
+      setShelters(seedShelters);
+      setReports(seedReports);
+      setMatches(seedMatches);
+      setShelterAnimals(seedShelterAnimals);
+      setCases(seedCases);
+      setFlags(seedFlags);
+      setNotifications(seedNotifications);
+      setConversations(seedConversations);
+      setMessages(seedMessages);
+      setServerStats({});
+      setStatus('ready');
+      return;
+    }
+    setUsers([]);
+    setShelters([]);
+    setReports([]);
+    setMatches([]);
+    setShelterAnimals([]);
+    setCases([]);
+    setFlags([]);
+    setNotifications([]);
+    setConversations([]);
+    setMessages([]);
+    setServerStats({});
+    setSelfId('');
+    setStatus('loading');
+    void refresh();
+    const timer = setInterval(() => void refresh(), POLL_MS);
+    return () => clearInterval(timer);
+    // A new token, role or server means a different account, so start over.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session?.token, session?.role, session?.baseUrl, refresh]);
+
+  /** Run a request the screen already reflects: on failure show the error and roll back to server state. */
+  const send = useCallback(
+    (task: Promise<unknown>) => {
+      pending.current += 1;
+      task
+        .finally(() => {
+          pending.current -= 1;
+        })
+        .then(
+          () => refresh(),
+          (e) => {
+            setError(errorMessage(e));
+            return refresh();
+          },
+        );
+    },
+    [refresh],
+  );
 
   const pushNotification = useCallback((n: Omit<NotificationItem, 'id' | 'createdAt' | 'isRead'>) => {
+    // Live notifications are created by the server.
+    if (sessionRef.current) return;
     setNotifications((prev) => [
       { ...n, id: uid('n'), createdAt: new Date().toISOString(), isRead: false },
       ...prev,
@@ -154,18 +347,20 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
   // -------------------------------------------------------------- selectors
 
   const stats = useMemo<DashboardStats>(() => {
-    const live = reports.filter((r) => r.status === 'active' || r.status === 'matched');
+    const open = reports.filter((r) => r.status === 'active' || r.status === 'matched');
     return {
       lostToday: reports.filter((r) => r.kind === 'lost' && withinLast24h(r.reportedAt)).length,
       foundToday: reports.filter((r) => r.kind === 'found' && withinLast24h(r.reportedAt)).length,
-      activeReports: live.length,
+      activeReports: open.length,
       reunitedThisMonth:
         cases.filter((c) => c.status === 'reunited').length +
         shelterAnimals.filter((a) => a.caseStatus === 'reunited').length,
       underRescue: shelterAnimals.filter((a) => a.caseStatus === 'under_rescue').length,
       sheltersOnline: shelters.filter((s) => s.approvalStatus === 'approved').length,
+      // City-wide counters from the server cover rows this device never loads.
+      ...serverStats,
     };
-  }, [reports, cases, shelterAnimals, shelters]);
+  }, [reports, cases, shelterAnimals, shelters, serverStats]);
 
   const reportById = useCallback((id: string) => reports.find((r) => r.id === id), [reports]);
   const shelterById = useCallback((id: string) => shelters.find((s) => s.id === id), [shelters]);
@@ -307,16 +502,29 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
   // ---------------------------------------------------------------- actions
 
   const createReport = useCallback<AppState['createReport']>(
-    (input) => {
-      const report: AnimalReport = {
-        ...input,
-        id: uid('r'),
-        status: 'active',
-        reportedAt: new Date().toISOString(),
-        reporterId: currentUser.id,
-        reporterName: currentUser.fullName,
-        reporterPhone: currentUser.phone,
-      };
+    async (input) => {
+      const session = sessionRef.current;
+      let report: AnimalReport;
+      if (session) {
+        const { kind, ...payload } = input;
+        // The server assigns the id, so wait for it. The caller shows the error if it refuses.
+        pending.current += 1;
+        try {
+          report = await apiActions.createReport(session, kind, payload);
+        } finally {
+          pending.current -= 1;
+        }
+      } else {
+        report = {
+          ...input,
+          id: uid('r'),
+          status: 'active',
+          reportedAt: new Date().toISOString(),
+          reporterId: currentUser.id,
+          reporterName: currentUser.fullName,
+          reporterPhone: currentUser.phone,
+        };
+      }
       setReports((prev) => [report, ...prev]);
 
       // Alert every approved shelter whose radius covers this report.
@@ -369,26 +577,66 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         }
       }
 
+      if (session) void refresh();
       return report;
     },
-    [currentUser, shelters, pushNotification, runImageMatch],
+    [currentUser, shelters, pushNotification, runImageMatch, refresh],
   );
 
-  const setReportStatus = useCallback<AppState['setReportStatus']>((reportId, status) => {
-    setReports((prev) => prev.map((r) => (r.id === reportId ? { ...r, status } : r)));
-  }, []);
+  const setReportStatus = useCallback<AppState['setReportStatus']>(
+    (reportId, status) => {
+      const session = sessionRef.current;
+      const kind = reports.find((r) => r.id === reportId)?.kind;
+      setReports((prev) => prev.map((r) => (r.id === reportId ? { ...r, status } : r)));
+      if (session && kind) send(apiActions.setReportStatus(session, kind, reportId, status));
+    },
+    [reports, send],
+  );
 
-  const deleteReport = useCallback<AppState['deleteReport']>((reportId) => {
-    setReports((prev) => prev.filter((r) => r.id !== reportId));
-    setMatches((prev) => prev.filter((m) => m.lostReportId !== reportId && m.candidateId !== reportId));
-  }, []);
+  const deleteReport = useCallback<AppState['deleteReport']>(
+    (reportId) => {
+      const session = sessionRef.current;
+      const kind = reports.find((r) => r.id === reportId)?.kind;
+      setReports((prev) => prev.filter((r) => r.id !== reportId));
+      setMatches((prev) => prev.filter((m) => m.lostReportId !== reportId && m.candidateId !== reportId));
+      if (session && kind) send(apiActions.deleteReport(session, kind, reportId));
+    },
+    [reports, send],
+  );
 
-  const setShelterApproval = useCallback<AppState['setShelterApproval']>((shelterId, status) => {
-    setShelters((prev) => prev.map((s) => (s.id === shelterId ? { ...s, approvalStatus: status } : s)));
-  }, []);
+  const setShelterApproval = useCallback<AppState['setShelterApproval']>(
+    (shelterId, status) => {
+      const session = sessionRef.current;
+      setShelters((prev) => prev.map((s) => (s.id === shelterId ? { ...s, approvalStatus: status } : s)));
+      if (!session) return;
+      send(
+        apiActions
+          .reviewShelter(session, shelterId, status === 'approved' ? 'approve' : 'reject')
+          .then((res) => {
+            if (res.temporaryPassword && res.adminEmail) {
+              setIssuedLogin({ shelterId, email: res.adminEmail, password: res.temporaryPassword });
+            }
+          }),
+      );
+    },
+    [send],
+  );
 
   const openCase = useCallback<AppState['openCase']>(
     (reportId, note) => {
+      const session = sessionRef.current;
+      if (session) {
+        // The server assigns the case id, and later status edits need it, so wait for it.
+        send(
+          apiActions.openCase(session, reportId, note).then((created) => {
+            setCases((prev) => [created, ...prev]);
+            setReports((prev) =>
+              prev.map((r) => (r.id === reportId ? { ...r, caseId: created.id, status: 'matched' } : r)),
+            );
+          }),
+        );
+        return;
+      }
       const id = uid('c');
       const at = new Date().toISOString();
       setCases((prev) => [
@@ -414,11 +662,13 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         relatedReportId: reportId,
       });
     },
-    [currentShelter, pushNotification],
+    [currentShelter, pushNotification, send],
   );
 
   const setCaseStatus = useCallback<AppState['setCaseStatus']>(
     (caseId, status, note) => {
+      const session = sessionRef.current;
+      if (session) send(apiActions.setCaseStatus(session, caseId, status, note));
       const at = new Date().toISOString();
       let reportId: string | undefined;
       setCases((prev) =>
@@ -444,40 +694,60 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         relatedReportId: reportId,
       });
     },
-    [currentShelter, pushNotification],
+    [currentShelter, pushNotification, send],
   );
 
-  const setShelterAnimalStatus = useCallback<AppState['setShelterAnimalStatus']>((animalId, status) => {
-    setShelterAnimals((prev) =>
-      prev.map((a) => (a.id === animalId ? { ...a, caseStatus: status } : a)),
-    );
-  }, []);
+  const setShelterAnimalStatus = useCallback<AppState['setShelterAnimalStatus']>(
+    (animalId, status) => {
+      const session = sessionRef.current;
+      setShelterAnimals((prev) =>
+        prev.map((a) => (a.id === animalId ? { ...a, caseStatus: status } : a)),
+      );
+      if (session) send(apiActions.updateShelterAnimal(session, animalId, { caseStatus: status }));
+    },
+    [send],
+  );
 
   const addShelterAnimal = useCallback<AppState['addShelterAnimal']>(
     (input) => {
+      const session = sessionRef.current;
+      if (session) {
+        send(apiActions.addShelterAnimal(session, input).then((created) => setShelterAnimals((prev) => [created, ...prev])));
+        return;
+      }
       setShelterAnimals((prev) => [{ ...input, id: uid('sa'), shelterId: currentShelter.id }, ...prev]);
     },
-    [currentShelter.id],
+    [currentShelter.id, send],
   );
 
-  const toggleAnimalPublic = useCallback<AppState['toggleAnimalPublic']>((animalId) => {
-    setShelterAnimals((prev) =>
-      prev.map((a) => (a.id === animalId ? { ...a, postedPublicly: !a.postedPublicly } : a)),
-    );
-  }, []);
+  const toggleAnimalPublic = useCallback<AppState['toggleAnimalPublic']>(
+    (animalId) => {
+      const session = sessionRef.current;
+      const next = !shelterAnimals.find((a) => a.id === animalId)?.postedPublicly;
+      setShelterAnimals((prev) =>
+        prev.map((a) => (a.id === animalId ? { ...a, postedPublicly: next } : a)),
+      );
+      if (session) send(apiActions.updateShelterAnimal(session, animalId, { postedPublicly: next }));
+    },
+    [shelterAnimals, send],
+  );
 
   const updateShelterProfile = useCallback<AppState['updateShelterProfile']>(
     (patch) => {
+      const session = sessionRef.current;
       setShelters((prev) => prev.map((s) => (s.id === currentShelter.id ? { ...s, ...patch } : s)));
+      if (session) send(apiActions.updateShelterProfile(session, patch));
     },
-    [currentShelter.id],
+    [currentShelter.id, send],
   );
 
   const updateUserProfile = useCallback<AppState['updateUserProfile']>(
     (patch) => {
+      const session = sessionRef.current;
       setUsers((prev) => prev.map((u) => (u.id === currentUser.id ? { ...u, ...patch } : u)));
+      if (session) send(apiActions.updateUserProfile(session, patch));
     },
-    [currentUser.id],
+    [currentUser.id, send],
   );
 
   const sendMessage = useCallback<AppState['sendMessage']>(
@@ -536,32 +806,71 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     [currentUser],
   );
 
-  const markNotificationRead = useCallback<AppState['markNotificationRead']>((id) => {
-    setNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, isRead: true } : n)));
-  }, []);
+  const markNotificationRead = useCallback<AppState['markNotificationRead']>(
+    (id) => {
+      const session = sessionRef.current;
+      setNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, isRead: true } : n)));
+      if (session) send(apiActions.markNotificationRead(session, id));
+    },
+    [send],
+  );
 
-  const markAllNotificationsRead = useCallback<AppState['markAllNotificationsRead']>((role) => {
-    setNotifications((prev) => prev.map((n) => (n.audience === role ? { ...n, isRead: true } : n)));
-  }, []);
-
-  const resolveFlag = useCallback<AppState['resolveFlag']>((flagId, resolution) => {
-    setFlags((prev) => {
-      const flag = prev.find((f) => f.id === flagId);
-      if (flag && resolution === 'removed') {
-        setReports((rs) => rs.filter((r) => r.id !== flag.reportId));
+  const markAllNotificationsRead = useCallback<AppState['markAllNotificationsRead']>(
+    (role) => {
+      const session = sessionRef.current;
+      const unread = notifications.filter((n) => n.audience === role && !n.isRead);
+      setNotifications((prev) => prev.map((n) => (n.audience === role ? { ...n, isRead: true } : n)));
+      if (session && unread.length) {
+        send(Promise.all(unread.map((n) => apiActions.markNotificationRead(session, n.id))));
       }
-      if (flag && resolution === 'account_banned') {
-        setUsers((us) => us.map((u) => (u.id === flag.reporterId ? { ...u, isBanned: true } : u)));
-        setReports((rs) => rs.filter((r) => r.reporterId !== flag.reporterId));
-      }
-      return prev.map((f) => (f.id === flagId ? { ...f, resolution } : f));
-    });
-  }, []);
+    },
+    [notifications, send],
+  );
 
-  const banUser = useCallback<AppState['banUser']>((userId) => {
-    setUsers((prev) => prev.map((u) => (u.id === userId ? { ...u, isBanned: true } : u)));
-    setReports((prev) => prev.filter((r) => r.reporterId !== userId));
-  }, []);
+  const resolveFlag = useCallback<AppState['resolveFlag']>(
+    (flagId, resolution) => {
+      const session = sessionRef.current;
+      const target = flags.find((f) => f.id === flagId);
+      if (session && target && resolution !== 'pending') {
+        send(
+          resolution === 'dismissed'
+            ? apiActions.resolveFlag(session, flagId, 'dismiss')
+            : apiActions
+                .resolveFlag(session, flagId, 'remove_report')
+                .then(() => (resolution === 'account_banned' ? apiActions.banUser(session, target.reporterId) : undefined)),
+        );
+      }
+      setFlags((prev) => {
+        const flag = prev.find((f) => f.id === flagId);
+        if (flag && resolution === 'removed') {
+          setReports((rs) => rs.filter((r) => r.id !== flag.reportId));
+        }
+        if (flag && resolution === 'account_banned') {
+          setUsers((us) => us.map((u) => (u.id === flag.reporterId ? { ...u, isBanned: true } : u)));
+          setReports((rs) => rs.filter((r) => r.reporterId !== flag.reporterId));
+        }
+        return prev.map((f) => (f.id === flagId ? { ...f, resolution } : f));
+      });
+    },
+    [flags, send],
+  );
+
+  const banUser = useCallback<AppState['banUser']>(
+    (userId) => {
+      const session = sessionRef.current;
+      setUsers((prev) => prev.map((u) => (u.id === userId ? { ...u, isBanned: true } : u)));
+      setReports((prev) => prev.filter((r) => r.reporterId !== userId));
+      if (session) send(apiActions.banUser(session, userId));
+    },
+    [send],
+  );
+
+  const clearError = useCallback(() => setError(null), []);
+  const clearIssuedLogin = useCallback(() => setIssuedLogin(null), []);
+  const sync = useMemo<SyncState>(
+    () => ({ status, error, clearError, refresh }),
+    [status, error, clearError, refresh],
+  );
 
   const value = useMemo<AppState>(
     () => ({
@@ -577,6 +886,9 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       messages,
       currentUser,
       currentShelter,
+      sync,
+      issuedLogin,
+      clearIssuedLogin,
       stats,
       reportById,
       shelterById,
@@ -608,7 +920,8 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     }),
     [
       users, shelters, reports, matches, shelterAnimals, cases, flags, notifications,
-      conversations, messages, currentUser, currentShelter, stats, reportById, shelterById,
+      conversations, messages, currentUser, currentShelter, sync, issuedLogin, clearIssuedLogin,
+      stats, reportById, shelterById,
       myReports, nearbyReports, shelterAreaReports, matchesForReport, notificationsFor,
       messagesIn, caseForReport, runImageMatch, createReport, setReportStatus, deleteReport,
       setShelterApproval, openCase, setCaseStatus, setShelterAnimalStatus, addShelterAnimal,

@@ -7,6 +7,8 @@ const router = Router();
 router.use(authenticate, authorize('developer'));
 
 router.get('/dashboard', asyncHandler(developerController.dashboard));
+router.get('/overview', asyncHandler(developerController.overview));
+router.patch('/users/:id/ban', asyncHandler(developerController.banUser));
 
 // Shelter Approval Management
 router.get('/shelters/pending', asyncHandler(developerController.listPendingShelters));

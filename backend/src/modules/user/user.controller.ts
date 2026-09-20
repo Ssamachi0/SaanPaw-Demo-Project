@@ -7,6 +7,12 @@ export const userController = {
   register: async (req: Request, res: Response) =>
     res.status(201).json(await userService.register(req.body)),
 
+  me: async (req: Request, res: Response) => res.json(await userService.getMe(uid(req))),
+  updateProfile: async (req: Request, res: Response) =>
+    res.json(await userService.updateProfile(uid(req), req.body)),
+  myReports: async (req: Request, res: Response) =>
+    res.json(await userService.listMyReports(uid(req))),
+
   dashboard: async (_req: Request, res: Response) =>
     res.json(await userService.getDashboard()),
 
@@ -14,6 +20,13 @@ export const userController = {
     res.status(201).json(await userService.createLostReport(uid(req), req.body)),
   updateLostReportStatus: async (req: Request, res: Response) =>
     res.json(await userService.updateLostReportStatus(uid(req), req.params.id, req.body.status)),
+
+  updateFoundReportStatus: async (req: Request, res: Response) =>
+    res.json(await userService.updateFoundReportStatus(uid(req), req.params.id, req.body.status)),
+  deleteReport: async (req: Request, res: Response) => {
+    const kind = req.params.kind === 'found' ? 'found' : 'lost';
+    res.json(await userService.deleteReport(uid(req), kind, req.params.id));
+  },
 
   createFoundReport: async (req: Request, res: Response) =>
     res.status(201).json(await userService.createFoundReport(uid(req), req.body)),

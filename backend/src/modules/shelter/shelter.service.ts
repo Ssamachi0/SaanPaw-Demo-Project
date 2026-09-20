@@ -12,6 +12,7 @@ import {
   serializeLostReport,
   serializeFoundReport,
   serializeNotification,
+  serializeCase,
   latLngToGeoPoint,
 } from '../../utils/geoHelpers';
 import type { ANIMAL_CASE_STATUSES } from '../../config/constants';
@@ -92,12 +93,12 @@ export const shelterService = {
     const [lost, found] = await Promise.all([
       LostPetReport.find({
         isHiddenByModeration: false,
-        status: 'active',
+        status: { $in: ['active', 'matched'] },
         ...geolocationService.nearFilter('lastSeenLocation', lng, lat, radius),
       }).lean(),
       FoundAnimalReport.find({
         isHiddenByModeration: false,
-        status: 'active',
+        status: { $in: ['active', 'matched'] },
         ...geolocationService.nearFilter('foundLocation', lng, lat, radius),
       }).lean(),
     ]);
@@ -106,6 +107,48 @@ export const shelterService = {
       lost: lost.map(serializeLostReport),
       found: found.map(serializeFoundReport),
     };
+  },
+
+  // ----- Cases -----
+  async listCases(shelterId: string) {
+    const shelter = await Shelter.findById(shelterId).lean();
+    const cases = await AnimalCase.find({ shelterId }).sort({ updatedAt: -1 }).lean();
+    return cases.map((c) => serializeCase(c, shelter?.name));
+  },
+
+  /** Shelter responds to a lost or found report: opens a case and marks the report as matched. */
+  async openCase(shelterId: string, reportId: string, note?: string) {
+    const shelter = await Shelter.findById(shelterId).lean();
+    if (!shelter) throw ApiError.notFound('Shelter not found');
+
+    const lost = await LostPetReport.findById(reportId);
+    const report = lost ?? (await FoundAnimalReport.findById(reportId));
+    if (!report) throw ApiError.notFound('Report not found');
+
+    const existing = await AnimalCase.findOne({ shelterId, [lost ? 'lostReportId' : 'foundReportId']: report._id });
+    if (existing) throw ApiError.conflict('This shelter already has a case for that report');
+
+    const doc = await AnimalCase.create({
+      shelterId,
+      [lost ? 'lostReportId' : 'foundReportId']: report._id,
+      status: 'under_rescue',
+      history: [{ status: 'under_rescue', note, changedBy: shelterId, changedAt: new Date() }],
+    });
+    report.caseId = doc._id;
+    report.status = 'matched';
+    await report.save();
+
+    if (lost) {
+      await Notification.create({
+        audienceType: 'user',
+        audienceId: lost.reporterId,
+        type: 'status_update',
+        refId: lost._id,
+        title: 'A shelter responded to your report',
+        body: `${shelter.name} opened a rescue case. Status: Under rescue.`,
+      });
+    }
+    return serializeCase(doc.toObject(), shelter.name);
   },
 
   // ----- Animal Status Management -----
@@ -117,17 +160,51 @@ export const shelterService = {
   }) {
     const doc = await AnimalCase.findOne({ _id: params.caseId, shelterId: params.shelterId });
     if (!doc) throw ApiError.notFound('Animal case not found');
-    
+    const shelter = await Shelter.findById(params.shelterId).lean();
+
     doc.status = params.status;
     if (params.notes) doc.notes = params.notes;
     doc.history.push({
       status: params.status,
+      note: params.notes,
       changedBy: params.shelterId as never,
       changedAt: new Date(),
     });
-    
     await doc.save();
-    return doc;
+
+    if (doc.lostReportId) {
+      const lost = await LostPetReport.findById(doc.lostReportId);
+      if (lost) {
+        if (params.status === 'reunited') {
+          lost.status = 'recovered';
+          await lost.save();
+        }
+        await Notification.create({
+          audienceType: 'user',
+          audienceId: lost.reporterId,
+          type: 'status_update',
+          refId: lost._id,
+          title: 'Case status updated',
+          body: `${shelter?.name ?? 'The shelter'} set the case to "${params.status.replace('_', ' ')}". ${params.notes ?? ''}`.trim(),
+        });
+      }
+    }
+    return serializeCase(doc.toObject(), shelter?.name);
+  },
+
+  async updateAnimal(shelterId: string, id: string, patch: { caseStatus?: CaseStatus; postedPublicly?: boolean }) {
+    const update: Record<string, unknown> = {};
+    if (patch.caseStatus !== undefined) update.caseStatus = patch.caseStatus;
+    if (patch.postedPublicly !== undefined) update.postedPublicly = patch.postedPublicly;
+    const animal = await ShelterAnimal.findOneAndUpdate({ _id: id, shelterId }, update, { new: true });
+    if (!animal) throw ApiError.notFound('Animal not found');
+    return serializeShelterAnimal(animal);
+  },
+
+  async getMe(shelterId: string) {
+    const shelter = await Shelter.findById(shelterId).lean();
+    if (!shelter) throw ApiError.notFound('Shelter not found');
+    return serializeShelter(shelter);
   },
 
   // ----- Shelter Profile Management -----

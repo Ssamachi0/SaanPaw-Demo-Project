@@ -11,6 +11,7 @@ const animalCaseSchema = new Schema(
     history: [
       {
         status: { type: String, enum: ANIMAL_CASE_STATUSES },
+        note: { type: String, trim: true },
         changedBy: { type: Schema.Types.ObjectId, ref: 'Shelter' },
         changedAt: { type: Date, default: Date.now },
         _id: false,

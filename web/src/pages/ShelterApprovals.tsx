@@ -15,7 +15,7 @@ import { Badge, Banner, Button, Card, CardHead, EmptyState, Tabs } from '@/compo
  * so a permit can be read without losing your place.
  */
 export function ShelterApprovalsPage() {
-  const { shelters, setShelterApproval } = useApp();
+  const { shelters, setShelterApproval, issuedLogin, clearIssuedLogin } = useApp();
   const [tab, setTab] = useState<ShelterApprovalStatus>('pending');
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
@@ -34,6 +34,16 @@ export function ShelterApprovalsPage() {
 
   return (
     <>
+      {issuedLogin ? (
+        <Banner tone="success" title="Shelter login issued - shown once">
+          Give {shelters.find((s) => s.id === issuedLogin.shelterId)?.name ?? 'the shelter'} these
+          credentials: <strong>{issuedLogin.email}</strong> / <strong>{issuedLogin.password}</strong>.{' '}
+          <Button variant="ghost" small onClick={clearIssuedLogin}>
+            Dismiss
+          </Button>
+        </Banner>
+      ) : null}
+
       <Banner tone={count('pending') ? 'warning' : 'success'} title="Verification is a manual step">
         Confirm each permit number with the San Jose Del Monte city veterinary office before
         approving. An approved shelter immediately starts receiving smart alerts for every report

@@ -12,26 +12,31 @@ export const DEMO_DEVELOPER = {
 
 interface AuthState {
   signedIn: boolean;
+  /** Bearer token for the data store. */
+  token: string | null;
   signIn: (email: string, password: string) => Promise<void>;
   signOut: () => void;
 }
 
 const AuthContext = createContext<AuthState | undefined>(undefined);
 
-const readStoredSession = () => {
+const readStoredToken = () => {
   try {
-    return sessionStorage.getItem(SESSION_KEY) === 'developer';
+    // A session without a token (from before sign-in used the API) cannot call the server.
+    return sessionStorage.getItem(SESSION_KEY) === 'developer' ? sessionStorage.getItem(TOKEN_KEY) : null;
   } catch {
-    return false;
+    // Private browsing and blocked site data both throw.
+    return null;
   }
 };
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [signedIn, setSignedIn] = useState(readStoredSession);
+  const [token, setToken] = useState<string | null>(readStoredToken);
 
   const value = useMemo<AuthState>(
     () => ({
-      signedIn,
+      signedIn: token !== null,
+      token,
       signIn: async (email, password) => {
         const response = await apiRequest<{ token: string }>('/auth/login', {
           method: 'POST',
@@ -44,7 +49,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         } catch {
           // session still valid in memory
         }
-        setSignedIn(true);
+        setToken(response.token);
       },
       signOut: () => {
         try {
@@ -53,10 +58,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         } catch {
           /* nothing to clear */
         }
-        setSignedIn(false);
+        setToken(null);
       },
     }),
-    [signedIn],
+    [token],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

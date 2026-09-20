@@ -9,3 +9,4 @@ export * from './sjdm';
 export * from './sjdmBoundary';
 export * from './store/AppStore';
 export * from './describe';
+export * from './api';

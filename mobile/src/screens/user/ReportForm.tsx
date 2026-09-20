@@ -57,6 +57,7 @@ export function ReportForm({
   const [pin, setPin] = useState<LatLng>(currentUser.location);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [submitted, setSubmitted] = useState<AnimalReport | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
   /** Where auto-tagging got to. */
   const [geo, setGeo] = useState<
@@ -126,7 +127,8 @@ export function ReportForm({
     }
   };
 
-  const submit = () => {
+  const submit = async () => {
+    if (submitting) return;
     const next: Record<string, string> = {};
     if (!images.length) next.images = 'Attach at least one photo - matching is image-based.';
     if (kind === 'lost' && !name.trim()) next.name = "Enter your pet's name.";
@@ -136,21 +138,28 @@ export function ReportForm({
     setErrors(next);
     if (Object.values(next).some(Boolean)) return;
 
-    const report = createReport({
-      kind,
-      name: kind === 'lost' ? name.trim() : undefined,
-      animalType,
-      breed: breed.trim() || undefined,
-      color: color.trim(),
-      sex,
-      size,
-      distinctMarks: marks.trim() || undefined,
-      description: description.trim() || undefined,
-      imageUrls: images,
-      barangay: barangay!,
-      location: pin,
-    });
-    setSubmitted(report);
+    setSubmitting(true);
+    try {
+      const report = await createReport({
+        kind,
+        name: kind === 'lost' ? name.trim() : undefined,
+        animalType,
+        breed: breed.trim() || undefined,
+        color: color.trim(),
+        sex,
+        size,
+        distinctMarks: marks.trim() || undefined,
+        description: description.trim() || undefined,
+        imageUrls: images,
+        barangay: barangay!,
+        location: pin,
+      });
+      setSubmitted(report);
+    } catch (e) {
+      setErrors({ submit: e instanceof Error ? e.message : 'Something went wrong. Please try again.' });
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   // ---- after submitting: confirmation plus any matches found
@@ -440,8 +449,10 @@ export function ReportForm({
         label={kind === 'lost' ? 'Submit lost pet report' : 'Submit found animal report'}
         variant={kind === 'lost' ? 'danger' : 'accent'}
         icon="send"
+        loading={submitting}
         onPress={submit}
       />
+      {errors.submit ? <Banner tone="danger" icon="warning" title="Could not submit" message={errors.submit} /> : null}
       <Button label="Cancel" variant="ghost" onPress={() => navigation.goBack()} />
     </Screen>
   );

@@ -7,6 +7,8 @@ export const shelterController = {
   register: async (req: Request, res: Response) =>
     res.status(201).json(await shelterService.register(req.body)),
 
+  me: async (req: Request, res: Response) => res.json(await shelterService.getMe(sid(req))),
+
   dashboard: async (req: Request, res: Response) =>
     res.json(await shelterService.getDashboard(sid(req))),
 
@@ -15,11 +17,19 @@ export const shelterController = {
   addShelterAnimal: async (req: Request, res: Response) =>
     res.status(201).json(await shelterService.addShelterAnimal(sid(req), req.body)),
 
+  updateAnimal: async (req: Request, res: Response) =>
+    res.json(await shelterService.updateAnimal(sid(req), req.params.id, req.body)),
+
   postRecovered: async (req: Request, res: Response) =>
     res.status(201).json(await shelterService.postRecovered(sid(req), req.body)),
 
   listAreaReports: async (req: Request, res: Response) =>
     res.json(await shelterService.listAreaReports(sid(req))),
+
+  listCases: async (req: Request, res: Response) =>
+    res.json(await shelterService.listCases(sid(req))),
+  openCase: async (req: Request, res: Response) =>
+    res.status(201).json(await shelterService.openCase(sid(req), req.body.reportId, req.body.note)),
 
   updateCaseStatus: async (req: Request, res: Response) =>
     res.json(

@@ -11,15 +11,19 @@ router.post('/register', geoFence, asyncHandler(shelterController.register));
 
 router.use(authenticate, authorize('shelter_admin'));
 
+router.get('/me', asyncHandler(shelterController.me));
 router.get('/dashboard', asyncHandler(shelterController.dashboard));
 
 // Shelter Animals Management + Recovered Animals Posting
 router.get('/animals', asyncHandler(shelterController.listShelterAnimals));
 router.post('/animals', asyncHandler(shelterController.addShelterAnimal));
 router.post('/animals/recovered', asyncHandler(shelterController.postRecovered));
+router.patch('/animals/:id', asyncHandler(shelterController.updateAnimal));
 
 // Animal Report Management + Animal Status Management
 router.get('/reports', asyncHandler(shelterController.listAreaReports));
+router.get('/cases', asyncHandler(shelterController.listCases));
+router.post('/cases', asyncHandler(shelterController.openCase));
 router.patch('/cases/:id/status', asyncHandler(shelterController.updateCaseStatus));
 
 // Shelter Profile Management
