@@ -8,18 +8,20 @@ const shelterAnimalSchema = new Schema(
     animalType: { type: String, enum: ANIMAL_TYPES, required: true },
     breed: { type: String, trim: true },
     color: { type: String, trim: true },
+    sex: { type: String, enum: ['male', 'female', 'unknown'], default: 'unknown' },
+    size: { type: String, enum: ['small', 'medium', 'large'] },
+    distinctMarks: { type: String, trim: true },
     description: { type: String, trim: true },
     imageUrls: { type: [String], default: [] },
-    intakeReason: { type: String, trim: true },
-    adoptionStatus: {
-      type: String,
-      enum: ['in_care', 'available', 'adopted'],
-      default: 'in_care',
-    },
-    // "Recovered Animals Posting" - flags animals the shelter recovered/rescued
-    // and is publicly showing so owners can identify them.
-    isRecoveredPost: { type: Boolean, default: false },
+    intakeType: { type: String, enum: ['surrendered', 'recovered', 'rescued'], default: 'surrendered' },
     intakeDate: { type: Date, default: Date.now },
+    caseStatus: {
+      type: String,
+      enum: ['under_rescue', 'reunited', 'adopted', 'inconclusive'],
+      default: 'under_rescue',
+    },
+    postedPublicly: { type: Boolean, default: false },
+    notes: { type: String, trim: true },
   },
   { timestamps: true },
 );

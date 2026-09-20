@@ -18,11 +18,12 @@ const userSchema = new Schema(
     role: { type: String, default: 'user', immutable: true },
     alertRadiusMeters: { type: Number, default: () => env.alerts.defaultUserRadius },
     homeLocation: { type: pointSchema, required: true },
+    barangay: { type: String, required: true, trim: true },
     expoPushToken: { type: String },
-    falseReportCount: { type: Number, default: 0 },
+    flaggedReportCount: { type: Number, default: 0 },
     isBanned: { type: Boolean, default: false },
   },
-  { timestamps: true },
+  { timestamps: { createdAt: 'joinedAt', updatedAt: 'updatedAt' } },
 );
 
 userSchema.index({ homeLocation: '2dsphere' });

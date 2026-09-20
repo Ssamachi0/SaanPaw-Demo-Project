@@ -11,6 +11,16 @@ import { geolocationService } from '../../services/geolocation.service';
 import { authService } from '../auth/auth.service';
 import { REPORT_STATUSES } from '../../config/constants';
 import { ApiError } from '../../utils/ApiError';
+import {
+  serializeUser,
+  serializeShelter,
+  serializeLostReport,
+  serializeFoundReport,
+  serializeShelterAnimal,
+  serializeMatchSuggestion,
+  serializeNotification,
+  latLngToGeoPoint,
+} from '../../utils/geoHelpers';
 
 export const userService = {
   // ----- Registration -----
@@ -19,52 +29,79 @@ export const userService = {
     email: string;
     phone?: string;
     password: string;
+    barangay: string;
     alertRadiusMeters: number;
-    homeLocation: { type: 'Point'; coordinates: [number, number] };
+    location: { latitude: number; longitude: number };
   }) {
     const exists = await User.findOne({ email: input.email.toLowerCase().trim() });
     if (exists) throw ApiError.conflict('Email already registered');
+    
     const user = await User.create({
       fullName: input.fullName,
       email: input.email.toLowerCase().trim(),
       phone: input.phone,
       passwordHash: await authService.hashPassword(input.password),
+      barangay: input.barangay,
       alertRadiusMeters: input.alertRadiusMeters,
-      homeLocation: input.homeLocation,
+      homeLocation: latLngToGeoPoint(input.location),
     });
-    return { id: user._id };
+    
+    return serializeUser(user);
   },
 
   // ----- Dashboard -----
   async getDashboard() {
     const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
-    const [lostToday, foundToday, recoveredToday] = await Promise.all([
+    const [lostToday, foundToday, reunitedThisMonth] = await Promise.all([
       LostPetReport.countDocuments({ reportedAt: { $gte: since } }),
       FoundAnimalReport.countDocuments({ reportedAt: { $gte: since } }),
-      LostPetReport.countDocuments({ status: 'recovered', updatedAt: { $gte: since } }),
+      LostPetReport.countDocuments({ status: 'recovered', updatedAt: { $gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) } }),
     ]);
-    return { lostToday, foundToday, recoveredToday };
+    
+    const activeReports = await LostPetReport.countDocuments({ status: 'active' });
+    const sheltersOnline = await Shelter.countDocuments({ approvalStatus: 'approved' });
+    
+    return {
+      lostToday,
+      foundToday,
+      activeReports,
+      reunitedThisMonth,
+      underRescue: 0,
+      sheltersOnline,
+    };
   },
 
   // ----- Report Lost Pet -----
   async createLostReport(reporterId: string, data: any) {
-    const report = await LostPetReport.create({ ...data, reporterId });
+    const user = await User.findById(reporterId);
+    if (!user) throw ApiError.notFound('User not found');
+    
+    const report = await LostPetReport.create({
+      ...data,
+      reporterId,
+      reporterName: user.fullName,
+      reporterPhone: user.phone,
+      lastSeenLocation: latLngToGeoPoint(data.location),
+    });
+    
     const [lng, lat] = report.lastSeenLocation.coordinates as number[];
     await moderationService.screenReport({
       reportType: 'lost',
       reportId: String(report._id),
-      reporterId,
+      reporterId: String(reporterId),
       text: `${data.breed ?? ''} ${data.color ?? ''} ${data.description ?? ''}`,
       imageCount: report.imageUrls.length,
     });
+    
     await smartAlertService.dispatchReportAlert({
       reportType: 'lost',
       reportId: String(report._id),
       lng,
       lat,
-      summary: `${report.animalType} - ${report.color ?? ''} ${report.breed ?? ''}`.trim(),
+      summary: `${data.name || report.animalType} - ${data.color ?? ''} ${data.breed ?? ''}`.trim(),
     });
-    return report;
+    
+    return serializeLostReport(report);
   },
 
   // ----- Reported Lost Pet Status Update -----
@@ -76,59 +113,77 @@ export const userService = {
       { new: true },
     );
     if (!report) throw ApiError.notFound('Report not found');
-    return report;
+    return serializeLostReport(report);
   },
 
   // ----- Report Found Animal -----
   async createFoundReport(reporterId: string, data: any) {
-    const report = await FoundAnimalReport.create({ ...data, reporterId });
+    const user = await User.findById(reporterId);
+    if (!user) throw ApiError.notFound('User not found');
+    
+    const report = await FoundAnimalReport.create({
+      ...data,
+      reporterId,
+      reporterName: user.fullName,
+      reporterPhone: user.phone,
+      foundLocation: latLngToGeoPoint(data.location),
+    });
+    
     const [lng, lat] = report.foundLocation.coordinates as number[];
     await moderationService.screenReport({
       reportType: 'found',
       reportId: String(report._id),
-      reporterId,
+      reporterId: String(reporterId),
       text: `${data.breed ?? ''} ${data.color ?? ''} ${data.description ?? ''}`,
       imageCount: report.imageUrls.length,
     });
+    
     await smartAlertService.dispatchReportAlert({
       reportType: 'found',
       reportId: String(report._id),
       lng,
       lat,
-      summary: `${report.animalType} - ${report.color ?? ''} ${report.breed ?? ''}`.trim(),
+      summary: `${report.animalType} - ${data.color ?? ''} ${data.breed ?? ''}`.trim(),
     });
-    return report;
+    
+    return serializeFoundReport(report);
   },
 
   // ----- Shelter View -----
-  listShelters() {
-    return Shelter.find({ approvalStatus: 'approved' })
-      .select('name address contactNumber location operatingRadiusMeters')
-      .lean();
+  async listShelters() {
+    const shelters = await Shelter.find({ approvalStatus: 'approved' }).lean();
+    return shelters.map(serializeShelter);
   },
-  listShelterAnimals(shelterId: string) {
-    return ShelterAnimal.find({ shelterId, adoptionStatus: { $ne: 'adopted' } }).lean();
+
+  async listShelterAnimals(shelterId: string) {
+    const animals = await ShelterAnimal.find({ shelterId, caseStatus: { $ne: 'adopted' } }).lean();
+    return animals.map(serializeShelterAnimal);
   },
 
   // ----- Image Recognition Matching -----
-  matchSuggestions(lostReportId: string) {
-    return MatchSuggestion.find({ lostReportId, status: 'suggested' })
-      .sort({ similarityScore: -1 })
+  async matchSuggestions(lostReportId: string) {
+    const matches = await MatchSuggestion.find({ lostReportId })
+      .sort({ score: -1, createdAt: -1 })
+      .limit(10)
       .lean();
+    return matches.map(serializeMatchSuggestion);
   },
 
   // ----- Map View Interface -----
   async mapReports(bbox?: { lng: number; lat: number; radiusMeters: number }) {
     const lostQ: Record<string, unknown> = { status: 'active', isHiddenByModeration: false };
     const foundQ: Record<string, unknown> = { status: 'active', isHiddenByModeration: false };
+    
     if (bbox) {
       Object.assign(lostQ, geolocationService.nearFilter('lastSeenLocation', bbox.lng, bbox.lat, bbox.radiusMeters));
       Object.assign(foundQ, geolocationService.nearFilter('foundLocation', bbox.lng, bbox.lat, bbox.radiusMeters));
     }
+    
     const [lost, found] = await Promise.all([
-      LostPetReport.find(lostQ).select('animalType color breed lastSeenLocation reportedAt').lean(),
-      FoundAnimalReport.find(foundQ).select('animalType color breed foundLocation reportedAt').lean(),
+      LostPetReport.find(lostQ).lean(),
+      FoundAnimalReport.find(foundQ).lean(),
     ]);
+    
     return {
       type: 'FeatureCollection',
       features: [
@@ -139,7 +194,7 @@ export const userService = {
   },
 
   // ----- Search and Filter Reports -----
-  searchReports(filter: {
+  async searchReports(filter: {
     kind?: 'lost' | 'found';
     animalType?: string;
     dateFrom?: string;
@@ -148,7 +203,7 @@ export const userService = {
     lat?: number;
     radiusMeters?: number;
   }) {
-    const q: Record<string, unknown> = { isHiddenByModeration: false };
+    const q: Record<string, unknown> = { isHiddenByModeration: false, status: 'active' };
     if (filter.animalType) q.animalType = filter.animalType;
     if (filter.dateFrom || filter.dateTo) {
       q.reportedAt = {
@@ -156,42 +211,61 @@ export const userService = {
         ...(filter.dateTo ? { $lte: new Date(filter.dateTo) } : {}),
       };
     }
+    
     const runLost = filter.kind !== 'found';
     const runFound = filter.kind !== 'lost';
     const withGeo = (field: string) =>
       filter.lng != null && filter.lat != null && filter.radiusMeters != null
         ? geolocationService.nearFilter(field, filter.lng, filter.lat, filter.radiusMeters)
         : {};
-    return Promise.all([
+    
+    const [lost, found] = await Promise.all([
       runLost ? LostPetReport.find({ ...q, ...withGeo('lastSeenLocation') }).lean() : [],
       runFound ? FoundAnimalReport.find({ ...q, ...withGeo('foundLocation') }).lean() : [],
-    ]).then(([lost, found]) => ({ lost, found }));
+    ]);
+    
+    return {
+      lost: lost.map(serializeLostReport),
+      found: found.map(serializeFoundReport),
+    };
   },
 
   // ----- Smart Notifications feed -----
-  listNotifications(userId: string) {
-    return Notification.find({ audienceType: 'user', audienceId: userId })
+  async listNotifications(userId: string) {
+    const notifications = await Notification.find({ audienceType: 'user', audienceId: userId })
       .sort({ createdAt: -1 })
       .limit(100)
       .lean();
+    return notifications.map(serializeNotification);
   },
-  markNotificationRead(userId: string, id: string) {
-    return Notification.findOneAndUpdate(
+
+  async markNotificationRead(userId: string, id: string) {
+    const notif = await Notification.findOneAndUpdate(
       { _id: id, audienceType: 'user', audienceId: userId },
       { isRead: true },
       { new: true },
     );
+    if (!notif) throw ApiError.notFound('Notification not found');
+    return serializeNotification(notif);
   },
 
-  updatePushToken(userId: string, token: string) {
-    return User.findByIdAndUpdate(userId, { expoPushToken: token }, { new: true });
+  async updatePushToken(userId: string, token: string) {
+    const user = await User.findByIdAndUpdate(userId, { expoPushToken: token }, { new: true });
+    return user ? serializeUser(user) : null;
   },
 };
 
 function toFeature(r: any, kind: 'lost' | 'found', point: any) {
   return {
-    type: 'Feature',
+    type: 'Feature' as const,
     geometry: point,
-    properties: { id: String(r._id), kind, animalType: r.animalType, color: r.color, breed: r.breed, reportedAt: r.reportedAt },
+    properties: {
+      id: String(r._id),
+      kind,
+      animalType: r.animalType,
+      color: r.color,
+      breed: r.breed,
+      reportedAt: r.reportedAt,
+    },
   };
 }

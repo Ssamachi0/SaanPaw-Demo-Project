@@ -81,8 +81,11 @@ export const developerService = {
       flag.status = 'dismissed';
     } else {
       flag.status = 'actioned';
-      const Model = flag.reportType === 'lost' ? LostPetReport : FoundAnimalReport;
-      await Model.findByIdAndUpdate(flag.reportId, { isHiddenByModeration: true });
+      if (flag.reportType === 'lost') {
+        await LostPetReport.findByIdAndUpdate(flag.reportId, { isHiddenByModeration: true });
+      } else {
+        await FoundAnimalReport.findByIdAndUpdate(flag.reportId, { isHiddenByModeration: true });
+      }
     }
     flag.resolvedBy = params.developerId as never;
     flag.resolutionNote = params.note;

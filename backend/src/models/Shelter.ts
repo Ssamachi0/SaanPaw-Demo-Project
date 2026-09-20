@@ -13,19 +13,24 @@ const pointSchema = new Schema(
 const shelterSchema = new Schema(
   {
     name: { type: String, required: true, trim: true },
-    contactNumber: { type: String, trim: true },
+    barangay: { type: String, required: true, trim: true },
     address: { type: String, trim: true },
+    contactNumber: { type: String, trim: true },
+    email: { type: String, lowercase: true, trim: true },
     location: { type: pointSchema, required: true },
     operatingRadiusMeters: { type: Number, default: () => env.alerts.defaultShelterRadius },
     approvalStatus: { type: String, enum: SHELTER_APPROVAL_STATUSES, default: 'pending' },
-    lguPermitNumber: { type: String, trim: true },
+    permitNumber: { type: String, trim: true },
+    capacity: { type: Number, default: 30 },
+    currentOccupancy: { type: Number, default: 0 },
+    logoColor: { type: String, default: '#2563EB' },
     rejectionReason: { type: String },
     approvedBy: { type: Schema.Types.ObjectId, ref: 'DeveloperAccount' },
     // Credentials issued by the Developer after LGU verification:
     adminEmail: { type: String, lowercase: true, trim: true },
     adminPasswordHash: { type: String },
   },
-  { timestamps: true },
+  { timestamps: { createdAt: 'registeredAt', updatedAt: 'updatedAt' } },
 );
 
 shelterSchema.index({ location: '2dsphere' });

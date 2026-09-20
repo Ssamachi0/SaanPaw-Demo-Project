@@ -6,6 +6,14 @@ import { FoundAnimalReport } from '../../models/FoundAnimalReport';
 import { Notification } from '../../models/Notification';
 import { geolocationService } from '../../services/geolocation.service';
 import { ApiError } from '../../utils/ApiError';
+import {
+  serializeShelter,
+  serializeShelterAnimal,
+  serializeLostReport,
+  serializeFoundReport,
+  serializeNotification,
+  latLngToGeoPoint,
+} from '../../utils/geoHelpers';
 import type { ANIMAL_CASE_STATUSES } from '../../config/constants';
 
 type CaseStatus = (typeof ANIMAL_CASE_STATUSES)[number];
@@ -14,46 +22,73 @@ export const shelterService = {
   // ----- Register -----
   async register(input: {
     name: string;
+    barangay: string;
     contactNumber?: string;
+    email?: string;
     address?: string;
-    location: { type: 'Point'; coordinates: [number, number] };
+    location: { latitude: number; longitude: number };
     operatingRadiusMeters: number;
-    lguPermitNumber?: string;
+    permitNumber?: string;
+    capacity?: number;
   }) {
-    const shelter = await Shelter.create({ ...input, approvalStatus: 'pending' });
-    // Developer verifies with the LGU, then issues credentials on approval.
-    return { id: shelter._id, approvalStatus: shelter.approvalStatus };
+    const shelter = await Shelter.create({
+      name: input.name,
+      barangay: input.barangay,
+      contactNumber: input.contactNumber,
+      email: input.email,
+      address: input.address,
+      location: latLngToGeoPoint(input.location),
+      operatingRadiusMeters: input.operatingRadiusMeters,
+      permitNumber: input.permitNumber,
+      capacity: input.capacity,
+      approvalStatus: 'pending',
+    });
+    return serializeShelter(shelter);
   },
 
   // ----- Dashboard -----
   async getDashboard(shelterId: string) {
-    const [activeReports, rescued, ongoing] = await Promise.all([
-      AnimalCase.countDocuments({ shelterId, status: 'under_rescue' }),
-      AnimalCase.countDocuments({ shelterId, status: { $in: ['reunited', 'adopted'] } }),
-      AnimalCase.countDocuments({ shelterId, status: { $in: ['under_rescue', 'inconclusive'] } }),
+    const [activeReports, reunited, underRescue] = await Promise.all([
+      LostPetReport.countDocuments({
+        $or: [{ status: 'active' }, { status: 'matched' }],
+        isHiddenByModeration: false,
+      }),
+      ShelterAnimal.countDocuments({ shelterId, caseStatus: 'reunited' }),
+      ShelterAnimal.countDocuments({ shelterId, caseStatus: 'under_rescue' }),
     ]);
-    return { activeReports, rescued, ongoing };
+    return { activeReports, reunited, underRescue };
   },
 
   // ----- Shelter Animals Management -----
-  listShelterAnimals(shelterId: string) {
-    return ShelterAnimal.find({ shelterId }).sort({ intakeDate: -1 }).lean();
+  async listShelterAnimals(shelterId: string) {
+    const animals = await ShelterAnimal.find({ shelterId }).sort({ intakeDate: -1 }).lean();
+    return animals.map(serializeShelterAnimal);
   },
-  addShelterAnimal(shelterId: string, data: Record<string, unknown>) {
-    return ShelterAnimal.create({ ...data, shelterId });
+
+  async addShelterAnimal(shelterId: string, data: Record<string, unknown>) {
+    const animal = await ShelterAnimal.create({ ...data, shelterId });
+    return serializeShelterAnimal(animal);
   },
 
   // ----- Recovered Animals Posting -----
-  postRecovered(shelterId: string, data: Record<string, unknown>) {
-    return ShelterAnimal.create({ ...data, shelterId, isRecoveredPost: true, adoptionStatus: 'in_care' });
+  async postRecovered(shelterId: string, data: Record<string, unknown>) {
+    const animal = await ShelterAnimal.create({
+      ...data,
+      shelterId,
+      postedPublicly: true,
+      caseStatus: 'under_rescue',
+    });
+    return serializeShelterAnimal(animal);
   },
 
   // ----- Animal Report Management (lost/found within operating radius) -----
   async listAreaReports(shelterId: string) {
     const shelter = await Shelter.findById(shelterId).lean();
     if (!shelter) throw ApiError.notFound('Shelter not found');
+    
     const [lng, lat] = shelter.location!.coordinates as number[];
     const radius = shelter.operatingRadiusMeters;
+    
     const [lost, found] = await Promise.all([
       LostPetReport.find({
         isHiddenByModeration: false,
@@ -66,7 +101,11 @@ export const shelterService = {
         ...geolocationService.nearFilter('foundLocation', lng, lat, radius),
       }).lean(),
     ]);
-    return { lost, found };
+    
+    return {
+      lost: lost.map(serializeLostReport),
+      found: found.map(serializeFoundReport),
+    };
   },
 
   // ----- Animal Status Management -----
@@ -78,32 +117,57 @@ export const shelterService = {
   }) {
     const doc = await AnimalCase.findOne({ _id: params.caseId, shelterId: params.shelterId });
     if (!doc) throw ApiError.notFound('Animal case not found');
+    
     doc.status = params.status;
     if (params.notes) doc.notes = params.notes;
-    doc.history.push({ status: params.status, changedBy: params.shelterId as never, changedAt: new Date() });
+    doc.history.push({
+      status: params.status,
+      changedBy: params.shelterId as never,
+      changedAt: new Date(),
+    });
+    
     await doc.save();
     return doc;
   },
 
   // ----- Shelter Profile Management -----
   async updateProfile(shelterId: string, patch: Record<string, unknown>) {
-    const allowed = ['name', 'contactNumber', 'address', 'location', 'operatingRadiusMeters'];
-    const update = Object.fromEntries(Object.entries(patch).filter(([k]) => allowed.includes(k)));
-    return Shelter.findByIdAndUpdate(shelterId, update, { new: true });
+    const allowed = ['name', 'contactNumber', 'address', 'location', 'operatingRadiusMeters', 'email'];
+    const update = Object.fromEntries(
+      Object.entries(patch)
+        .filter(([k]) => allowed.includes(k))
+        .map(([k, v]) => {
+          // Convert location from LatLng to GeoPoint if present
+          if (k === 'location' && v && typeof v === 'object' && 'latitude' in v) {
+            return [k, latLngToGeoPoint(v as any)];
+          }
+          return [k, v];
+        })
+    );
+    
+    const shelter = await Shelter.findByIdAndUpdate(shelterId, update, { new: true });
+    return shelter ? serializeShelter(shelter) : null;
   },
 
   // ----- Notification Management -----
-  listNotifications(shelterId: string) {
-    return Notification.find({ audienceType: 'shelter', audienceId: shelterId })
+  async listNotifications(shelterId: string) {
+    const notifications = await Notification.find({
+      audienceType: 'shelter',
+      audienceId: shelterId,
+    })
       .sort({ createdAt: -1 })
       .limit(100)
       .lean();
+    return notifications.map(serializeNotification);
   },
-  markNotificationRead(shelterId: string, id: string) {
-    return Notification.findOneAndUpdate(
+
+  async markNotificationRead(shelterId: string, id: string) {
+    const notif = await Notification.findOneAndUpdate(
       { _id: id, audienceType: 'shelter', audienceId: shelterId },
       { isRead: true },
       { new: true },
     );
+    if (!notif) throw ApiError.notFound('Notification not found');
+    return serializeNotification(notif);
   },
 };

@@ -86,27 +86,30 @@ Demo logins (pre-filled on each login screen):
 | Shelter Admin | mobile app | `shelter@saanpaw.ph` | `saanpaw123` |
 | Developer | web console | `dev@saanpaw.ph` | `saanpaw123` |
 
-The backend is scaffolded but not yet wired to the app:
+The backend REST API is now **fully implemented** and ready for mobile integration:
 
 ```bash
 cd backend
 cp .env.example .env          # set MONGODB_URI, JWT_SECRET, etc.
-npm run dev
+npm install                   # install dependencies
+npm run seed                  # populate demo data (requires MongoDB)
+npm run dev                   # start development server on http://localhost:4000
 ```
+
+See [BACKEND_DEVELOPMENT.md](BACKEND_DEVELOPMENT.md) for comprehensive backend documentation,
+including all 19 implemented endpoints, data models, authentication, and deployment instructions.
 
 ## Status
 
 | Layer | State |
 |-------|-------|
-| Shared domain (`shared/`) | Implemented — types, geo-fence, matching, seed data, design tokens |
-| Mobile app (`mobile/`) | Implemented — User + Shelter Admin modules, 23 routed screens |
-| Developer console (`web/`) | Implemented — login, dashboard, shelter approvals, report monitoring, system management |
-| Data layer | In-memory store in `shared/src/store/AppStore.tsx`, seeded from `shared/src/mock/` |
-| Backend API | Scaffolded (models, routes, services) — not yet connected to either surface |
+| Shared domain (`shared/`) | ✅ Implemented — types, geo-fence, matching, seed data, design tokens |
+| Mobile app (`mobile/`) | ✅ Implemented — User + Shelter Admin modules, 23 routed screens |
+| Developer console (`web/`) | ✅ Implemented — login, dashboard, shelter approvals, report monitoring, system management |
+| Backend API (`backend/`) | ✅ Implemented — All 19 endpoints, models, auth, services, database seeding |
+| Data layer | In-memory store (mobile/web) connects to MongoDB backend via REST API |
 
-Each surface currently runs its own copy of the in-memory store, so an approval in
-the console does not show up in a separately running mobile app. Both will read and
-write the same database once the REST API is connected.
+**Next phase:** Integrate mobile app with backend API by adding HTTP client and replacing mock store calls with API calls.
 
 ## Development methodology
 

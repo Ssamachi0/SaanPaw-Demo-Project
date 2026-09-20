@@ -1,5 +1,5 @@
 import bcrypt from 'bcryptjs';
-import jwt from 'jsonwebtoken';
+import jwt, { type SignOptions } from 'jsonwebtoken';
 import { env } from '../../config/env';
 import type { Role } from '../../config/constants';
 import { User } from '../../models/User';
@@ -8,7 +8,7 @@ import { DeveloperAccount } from '../../models/DeveloperAccount';
 import { ApiError } from '../../utils/ApiError';
 
 function sign(payload: Express.UserPayload): string {
-  return jwt.sign(payload, env.jwtSecret, { expiresIn: env.jwtExpiresIn });
+  return jwt.sign(payload, env.jwtSecret, { expiresIn: env.jwtExpiresIn } as any);
 }
 
 export const authService = {

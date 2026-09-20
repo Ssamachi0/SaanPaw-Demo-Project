@@ -1,11 +1,8 @@
 import { createContext, useContext, useMemo, useState, type ReactNode } from 'react';
-
-/**
- * Sign-in for the console. Only the developer role exists here - the other two
- * modules are in the mobile app. Checked against the demo account for now.
- */
+import { apiRequest } from './lib/api';
 
 const SESSION_KEY = 'saanpaw.console.session';
+const TOKEN_KEY = 'saanpaw.console.token';
 
 export const DEMO_DEVELOPER = {
   email: 'dev@saanpaw.ph',
@@ -15,7 +12,7 @@ export const DEMO_DEVELOPER = {
 
 interface AuthState {
   signedIn: boolean;
-  signIn: (email: string, password: string) => void;
+  signIn: (email: string, password: string) => Promise<void>;
   signOut: () => void;
 }
 
@@ -25,7 +22,6 @@ const readStoredSession = () => {
   try {
     return sessionStorage.getItem(SESSION_KEY) === 'developer';
   } catch {
-    // Private browsing and blocked site data both throw.
     return false;
   }
 };
@@ -36,20 +32,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const value = useMemo<AuthState>(
     () => ({
       signedIn,
-      signIn: (email, password) => {
-        const ok =
-          email.trim().toLowerCase() === DEMO_DEVELOPER.email && password === DEMO_DEVELOPER.password;
-        if (!ok) throw new Error('Incorrect email or password.');
+      signIn: async (email, password) => {
+        const response = await apiRequest<{ token: string }>('/auth/login', {
+          method: 'POST',
+          body: JSON.stringify({ role: 'developer', email, password }),
+        });
+
         try {
           sessionStorage.setItem(SESSION_KEY, 'developer');
+          sessionStorage.setItem(TOKEN_KEY, response.token);
         } catch {
-          /* session still valid in memory */
+          // session still valid in memory
         }
         setSignedIn(true);
       },
       signOut: () => {
         try {
           sessionStorage.removeItem(SESSION_KEY);
+          sessionStorage.removeItem(TOKEN_KEY);
         } catch {
           /* nothing to clear */
         }

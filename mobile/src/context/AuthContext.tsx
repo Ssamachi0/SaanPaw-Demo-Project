@@ -1,19 +1,13 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { Role } from '@saanpaw/shared';
-
-/**
- * Sign-in for the two mobile modules.
- * The Developer module lives in the web console, so `MobileRole` leaves it out
- * and a developer login cannot be added here by accident.
- */
+import { apiRequest } from '../services/api';
 
 const SESSION_KEY = 'saanpaw.session';
+const TOKEN_KEY = 'saanpaw.token';
 
-/** Roles the mobile app allows. No `developer` on purpose. */
 export type MobileRole = Extract<Role, 'user' | 'shelter_admin'>;
 
-/** Demo logins, pre-filled on each login screen. */
 export const DEMO_ACCOUNTS: Record<MobileRole, { email: string; password: string; label: string }> = {
   user: { email: 'user@saanpaw.ph', password: 'saanpaw123', label: 'Pet owner / community member' },
   shelter_admin: {
@@ -39,7 +33,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     AsyncStorage.getItem(SESSION_KEY)
       .then((stored) => {
-        // Reject a leftover "developer" session from an older build.
         setRole(stored === 'user' || stored === 'shelter_admin' ? stored : null);
       })
       .catch(() => setRole(null))
@@ -51,14 +44,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       role,
       loading,
       signIn: async (r, email, password) => {
-        const account = DEMO_ACCOUNTS[r];
-        const ok = email.trim().toLowerCase() === account.email && password === account.password;
-        if (!ok) throw new Error('Incorrect email or password for this module.');
+        const response = await apiRequest<{ token: string }>('/auth/login', {
+          method: 'POST',
+          body: JSON.stringify({ role: r, email, password }),
+        });
+
         await AsyncStorage.setItem(SESSION_KEY, r);
+        await AsyncStorage.setItem(TOKEN_KEY, response.token);
         setRole(r);
       },
       signOut: async () => {
         await AsyncStorage.removeItem(SESSION_KEY);
+        await AsyncStorage.removeItem(TOKEN_KEY);
         setRole(null);
       },
     }),

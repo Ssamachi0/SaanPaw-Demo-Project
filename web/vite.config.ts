@@ -19,10 +19,16 @@ export default defineConfig(({ command }) => ({
     },
   },
   server: {
+    host: '0.0.0.0',
     port: 5173,
+    open: true,
     // The shared workspace is consumed as TypeScript source with no build step,
     // so Vite has to be allowed to serve files from outside this package root.
     fs: { allow: [path.resolve(__dirname, '..')] },
+  },
+  preview: {
+    host: '0.0.0.0',
+    port: 4173,
   },
   optimizeDeps: {
     // Same reason: let esbuild compile the shared sources rather than trying to

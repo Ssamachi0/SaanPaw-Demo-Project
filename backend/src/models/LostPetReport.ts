@@ -12,14 +12,22 @@ const pointSchema = new Schema(
 const lostPetReportSchema = new Schema(
   {
     reporterId: { type: Schema.Types.ObjectId, ref: 'User', required: true, index: true },
+    reporterName: { type: String, required: true },
+    reporterPhone: { type: String },
+    name: { type: String, trim: true }, // Pet name
     animalType: { type: String, enum: ANIMAL_TYPES, required: true },
     breed: { type: String, trim: true },
     color: { type: String, trim: true },
+    sex: { type: String, enum: ['male', 'female', 'unknown'], default: 'unknown' },
+    size: { type: String, enum: ['small', 'medium', 'large'] },
+    distinctMarks: { type: String, trim: true },
     description: { type: String, trim: true },
     imageUrls: { type: [String], default: [] },
+    barangay: { type: String, required: true, trim: true },
     lastSeenLocation: { type: pointSchema, required: true },
     lastSeenAt: { type: Date },
     status: { type: String, enum: REPORT_STATUSES, default: 'active', index: true },
+    caseId: { type: Schema.Types.ObjectId, ref: 'AnimalCase' },
     matchedFoundReportId: { type: Schema.Types.ObjectId, ref: 'FoundAnimalReport' },
     isHiddenByModeration: { type: Boolean, default: false },
   },

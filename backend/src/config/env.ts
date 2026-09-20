@@ -11,7 +11,7 @@ function required(name: string, fallback?: string): string {
 }
 
 export const env = {
-  port: Number(process.env.PORT ?? 4000),
+  port: Number(process.env.PORT ?? 4001),
   nodeEnv: process.env.NODE_ENV ?? 'development',
   mongoUri: required('MONGODB_URI', 'mongodb://127.0.0.1:27017/saanpaw'),
   jwtSecret: required('JWT_SECRET', 'dev-secret'),

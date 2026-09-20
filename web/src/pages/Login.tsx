@@ -9,11 +9,11 @@ export function LoginPage() {
   const [password, setPassword] = useState(DEMO_DEVELOPER.password);
   const [error, setError] = useState<string | null>(null);
 
-  const submit = (e: FormEvent) => {
+  const submit = async (e: FormEvent) => {
     e.preventDefault();
     setError(null);
     try {
-      signIn(email, password);
+      await signIn(email, password);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Sign in failed.');
     }
