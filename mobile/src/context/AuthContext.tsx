@@ -6,6 +6,12 @@ import { apiRequest } from '../services/api';
 const SESSION_KEY = 'saanpaw.session';
 const TOKEN_KEY = 'saanpaw.token';
 
+/**
+ * The static GitHub Pages build has no backend. With this set, sign-in checks the demo
+ * accounts below and the app runs on its built-in sample data instead of calling the API.
+ */
+export const DEMO_MODE = process.env.EXPO_PUBLIC_DEMO_MODE === '1';
+
 export type MobileRole = Extract<Role, 'user' | 'shelter_admin'>;
 
 export const DEMO_ACCOUNTS: Record<MobileRole, { email: string; password: string; label: string }> = {
@@ -36,10 +42,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     Promise.all([AsyncStorage.getItem(SESSION_KEY), AsyncStorage.getItem(TOKEN_KEY)])
       .then(([stored, storedToken]) => {
-        // A session without a token (from before sign-in used the API) cannot call the server.
-        const valid = (stored === 'user' || stored === 'shelter_admin') && storedToken;
+        // A session without a token (from before sign-in used the API) cannot call the server,
+        // except in demo mode where there is no server.
+        const valid = (stored === 'user' || stored === 'shelter_admin') && (storedToken || DEMO_MODE);
         setRole(valid ? (stored as MobileRole) : null);
-        setToken(valid ? storedToken : null);
+        setToken(valid && !DEMO_MODE ? storedToken : null);
       })
       .catch(() => {
         setRole(null);
@@ -54,6 +61,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       token,
       loading,
       signIn: async (r, email, password) => {
+        if (DEMO_MODE) {
+          const account = DEMO_ACCOUNTS[r];
+          if (email.trim().toLowerCase() !== account.email || password !== account.password) {
+            throw new Error('Incorrect email or password for this module.');
+          }
+          await AsyncStorage.setItem(SESSION_KEY, r);
+          setRole(r);
+          return;
+        }
+
         const response = await apiRequest<{ token: string }>('/auth/login', {
           method: 'POST',
           body: JSON.stringify({ role: r, email, password }),

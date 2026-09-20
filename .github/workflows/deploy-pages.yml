@@ -40,12 +40,18 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
+      # Pages is static hosting, so there is no API to sign in to. Demo mode makes
+      # both apps check the demo accounts locally and use their built-in sample data.
       - name: Build developer console
         working-directory: web
+        env:
+          VITE_DEMO_MODE: '1'
         run: npx vite build
 
       - name: Export mobile app for web
         working-directory: mobile
+        env:
+          EXPO_PUBLIC_DEMO_MODE: '1'
         run: npx expo export -p web
 
       - name: Fix mobile asset paths for the /app/ subpath
