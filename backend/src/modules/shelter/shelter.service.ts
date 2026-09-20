@@ -209,7 +209,17 @@ export const shelterService = {
 
   // ----- Shelter Profile Management -----
   async updateProfile(shelterId: string, patch: Record<string, unknown>) {
-    const allowed = ['name', 'contactNumber', 'address', 'location', 'operatingRadiusMeters', 'email'];
+    const allowed = [
+      'name',
+      'contactNumber',
+      'address',
+      'barangay',
+      'location',
+      'operatingRadiusMeters',
+      'email',
+      'capacity',
+      'currentOccupancy',
+    ];
     const update = Object.fromEntries(
       Object.entries(patch)
         .filter(([k]) => allowed.includes(k))
