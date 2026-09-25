@@ -1,68 +1,32 @@
-import { useMemo, useRef, useState } from 'react';
-import {
-  Image,
-  LayoutChangeEvent,
-  PanResponder,
-  Pressable,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { StyleSheet, Text, View } from 'react-native';
+import { WebView, type WebViewMessageEvent } from 'react-native-webview';
 import { theme } from '@/constants/theme';
 import { SJDM_CENTER } from '@saanpaw/shared';
 import type { LatLng } from '@saanpaw/shared';
+import { MAPBOX_CONFIGURED, MAPBOX_STYLE, MAPBOX_TOKEN } from '@/config/mapbox';
+import { buildMapHtml, type MapMarkerConfig } from './mapboxHtml';
+import { MARKER_COLOR, type MapMarker } from './markerStyle';
+
+export type { MapMarker };
 
 /**
- * A pan-and-zoom map with no native dependency.
+ * A real Mapbox map (Android/iOS build).
  *
- * `react-native-maps` needs a Google API key and does not run on web, so this
- * draws OpenStreetMap tiles as plain <Image>s and places markers with Web
- * Mercator maths. Works on Android, iOS and web.
- *
- * Tiles are © OpenStreetMap contributors; the attribution below is required.
+ * Mapbox GL JS has no React Native binding, so this runs it as a web page
+ * inside a WebView loaded from Mapbox's CDN, and exchanges marker taps, pin
+ * drags, and location picks with it over `postMessage`. See `mapboxHtml.ts`
+ * for the page itself, and `MapCanvas.web.tsx` for the browser build, which
+ * runs the same library directly since there is no WebView on the web.
  */
 
-const TILE = 256;
-const TILE_URL = (z: number, x: number, y: number) =>
-  `https://tile.openstreetmap.org/${z}/${x}/${y}.png`;
-
-export interface MapMarker {
-  id: string;
-  coordinate: LatLng;
-  /** Pin colour: lost = red, found = amber, shelter = green. */
-  kind: 'lost' | 'found' | 'shelter' | 'me';
-  label?: string;
-}
-
-const MARKER_STYLE = {
-  lost: { color: theme.colors.danger, icon: 'alert-circle' as const },
-  found: { color: theme.colors.accent, icon: 'paw' as const },
-  shelter: { color: theme.colors.primary, icon: 'home' as const },
-  me: { color: theme.colors.info, icon: 'person' as const },
-};
-
-// ------------------------------------------------------------ projection
-
-const lngToWorldX = (lng: number, worldSize: number) => ((lng + 180) / 360) * worldSize;
-
-const latToWorldY = (lat: number, worldSize: number) => {
-  const s = Math.sin((lat * Math.PI) / 180);
-  return (0.5 - Math.log((1 + s) / (1 - s)) / (4 * Math.PI)) * worldSize;
-};
-
-const worldXToLng = (x: number, worldSize: number) => (x / worldSize) * 360 - 180;
-
-const worldYToLat = (y: number, worldSize: number) => {
-  const n = Math.PI * (1 - (2 * y) / worldSize);
-  return (180 / Math.PI) * Math.atan(Math.sinh(n));
-};
-
-/** Metres per pixel. Needed to size the radius circle. */
-const metersPerPixel = (lat: number, zoom: number) =>
-  (156543.03392 * Math.cos((lat * Math.PI) / 180)) / 2 ** zoom;
-
-// ------------------------------------------------------------ component
+const toMarkerConfig = (m: MapMarker): MapMarkerConfig => ({
+  id: m.id,
+  lat: m.coordinate.latitude,
+  lng: m.coordinate.longitude,
+  color: MARKER_COLOR[m.kind],
+  label: m.label,
+});
 
 export function MapCanvas({
   markers = [],
@@ -73,7 +37,7 @@ export function MapCanvas({
   radiusMeters,
   radiusCenter,
   onMarkerPress,
-  /** Lets the user tap to place a pin. */
+  /** Lets the user tap the map or drag a marker to place a pin. */
   onPickLocation,
   selectedMarkerId,
 }: {
@@ -87,170 +51,112 @@ export function MapCanvas({
   onPickLocation?: (c: LatLng) => void;
   selectedMarkerId?: string | null;
 }) {
-  const [center, setCenter] = useState<LatLng>(initialCenter);
-  const [zoom, setZoom] = useState(initialZoom);
-  const [size, setSize] = useState({ width: 0, height });
-  const last = useRef({ x: 0, y: 0 });
-  const dragged = useRef(false);
+  const webviewRef = useRef<WebView>(null);
+  const ready = useRef(false);
+  const pickable = useRef(Boolean(onPickLocation)).current;
+  const [loadError, setLoadError] = useState<string | null>(null);
 
-  const worldSize = TILE * 2 ** zoom;
-  const centerX = lngToWorldX(center.longitude, worldSize);
-  const centerY = latToWorldY(center.latitude, worldSize);
+  // Called through refs so the WebView bridge always reaches the latest
+  // handler without having to reload the page when a parent re-renders.
+  const onMarkerPressRef = useRef(onMarkerPress);
+  onMarkerPressRef.current = onMarkerPress;
+  const onPickLocationRef = useRef(onPickLocation);
+  onPickLocationRef.current = onPickLocation;
 
-  /** Map position -> screen position. */
-  const toScreen = (c: LatLng) => ({
-    x: lngToWorldX(c.longitude, worldSize) - centerX + size.width / 2,
-    y: latToWorldY(c.latitude, worldSize) - centerY + size.height / 2,
-  });
-
-  const pan = useMemo(
+  const html = useMemo(
     () =>
-      PanResponder.create({
-        onStartShouldSetPanResponder: () => true,
-        onMoveShouldSetPanResponder: (_e, g) => Math.abs(g.dx) > 2 || Math.abs(g.dy) > 2,
-        onPanResponderGrant: () => {
-          last.current = { x: 0, y: 0 };
-          dragged.current = false;
-        },
-        onPanResponderMove: (_e, g) => {
-          const dx = g.dx - last.current.x;
-          const dy = g.dy - last.current.y;
-          last.current = { x: g.dx, y: g.dy };
-          if (Math.abs(g.dx) > 3 || Math.abs(g.dy) > 3) dragged.current = true;
-
-          setCenter((prev) => {
-            const ws = TILE * 2 ** zoom;
-            const nx = lngToWorldX(prev.longitude, ws) - dx;
-            const ny = Math.min(ws, Math.max(0, latToWorldY(prev.latitude, ws) - dy));
-            return { latitude: worldYToLat(ny, ws), longitude: worldXToLng(nx, ws) };
-          });
-        },
+      buildMapHtml({
+        token: MAPBOX_TOKEN,
+        style: MAPBOX_STYLE,
+        center: initialCenter,
+        zoom: initialZoom,
+        minZoom: 10,
+        maxZoom: 18,
+        pickable,
+        markers: markers.map(toMarkerConfig),
+        selectedMarkerId,
+        radiusMeters,
+        radiusCenter,
       }),
-    [zoom],
+    // Only the very first render's data ends up in the page; everything
+    // after that goes through `updateData` so the map never reloads.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
   );
 
-  // Tiles covering the viewport, plus one extra row and column.
-  const tiles = useMemo(() => {
-    if (!size.width) return [];
-    const left = centerX - size.width / 2;
-    const top = centerY - size.height / 2;
-    const x0 = Math.floor(left / TILE);
-    const y0 = Math.floor(top / TILE);
-    const x1 = Math.ceil((left + size.width) / TILE);
-    const y1 = Math.ceil((top + size.height) / TILE);
-    const max = 2 ** zoom;
+  const push = (data: Record<string, unknown>) => {
+    if (!ready.current) return;
+    webviewRef.current?.injectJavaScript(`window.updateData(${JSON.stringify(data)});true;`);
+  };
 
-    const out: { key: string; uri: string; left: number; top: number }[] = [];
-    for (let x = x0; x <= x1; x++) {
-      for (let y = y0; y <= y1; y++) {
-        if (y < 0 || y >= max) continue;
-        const wrapped = ((x % max) + max) % max;
-        out.push({
-          key: `${zoom}/${x}/${y}`,
-          uri: TILE_URL(zoom, wrapped, y),
-          left: x * TILE - left,
-          top: y * TILE - top,
-        });
-      }
+  useEffect(() => {
+    push({
+      markers: markers.map(toMarkerConfig),
+      selectedMarkerId,
+      radiusMeters,
+      radiusCenter,
+      // Where the map's own "recenter" button goes back to. This does not move the camera by
+      // itself - if it did, every tap or drag would immediately re-centre on the spot the user
+      // just placed the pin, fighting the very interaction this map exists for.
+      center: initialCenter,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [markers, selectedMarkerId, radiusMeters, radiusCenter?.latitude, radiusCenter?.longitude, initialCenter.latitude, initialCenter.longitude]);
+
+  const handleMessage = (event: WebViewMessageEvent) => {
+    let message: { type: string; id?: string; lat?: number; lng?: number; message?: string };
+    try {
+      message = JSON.parse(event.nativeEvent.data);
+    } catch {
+      return;
     }
-    return out;
-  }, [centerX, centerY, size.width, size.height, zoom]);
-
-  const onLayout = (e: LayoutChangeEvent) => {
-    const { width, height: h } = e.nativeEvent.layout;
-    setSize({ width, height: h });
+    if (message.type === 'ready') {
+      ready.current = true;
+      push({ markers: markers.map(toMarkerConfig), selectedMarkerId, radiusMeters, radiusCenter });
+    } else if (message.type === 'marker' && message.id) {
+      onMarkerPressRef.current?.(message.id);
+    } else if (message.type === 'pick' && message.lat != null && message.lng != null) {
+      onPickLocationRef.current?.({ latitude: message.lat, longitude: message.lng });
+    } else if (message.type === 'error') {
+      // A bad/restricted token or no network reaches here as a Mapbox 'error' event inside the
+      // page, not a WebView load failure - without this the map just stays blank with no reason.
+      setLoadError(message.message ?? 'The map failed to load.');
+    }
   };
 
-  const radiusPx =
-    radiusMeters && radiusCenter
-      ? radiusMeters / metersPerPixel(radiusCenter.latitude, zoom)
-      : 0;
-  const radiusPos = radiusCenter ? toScreen(radiusCenter) : null;
-
-  const handleTap = (e: { nativeEvent: { locationX: number; locationY: number } }) => {
-    if (!onPickLocation || dragged.current) return;
-    const { locationX, locationY } = e.nativeEvent;
-    const wx = centerX + (locationX - size.width / 2);
-    const wy = centerY + (locationY - size.height / 2);
-    onPickLocation({ latitude: worldYToLat(wy, worldSize), longitude: worldXToLng(wx, worldSize) });
-  };
+  if (!MAPBOX_CONFIGURED) {
+    return (
+      <View style={[styles.wrap, styles.missingToken, { height }]}>
+        <Text style={styles.missingTokenText}>
+          Map unavailable - set EXPO_PUBLIC_MAPBOX_TOKEN to a Mapbox public token to enable it.
+        </Text>
+      </View>
+    );
+  }
 
   return (
-    <View style={[styles.wrap, { height }]} onLayout={onLayout}>
-      <Pressable style={StyleSheet.absoluteFill} onPress={handleTap} {...pan.panHandlers}>
-        {tiles.map((t) => (
-          <Image
-            key={t.key}
-            source={{ uri: t.uri }}
-            style={[styles.tile, { left: t.left, top: t.top }]}
-            fadeDuration={0}
-          />
-        ))}
-
-        {radiusPos && radiusPx > 0 ? (
-          <View
-            pointerEvents="none"
-            style={[
-              styles.radius,
-              {
-                left: radiusPos.x - radiusPx,
-                top: radiusPos.y - radiusPx,
-                width: radiusPx * 2,
-                height: radiusPx * 2,
-                borderRadius: radiusPx,
-              },
-            ]}
-          />
-        ) : null}
-
-        {markers.map((m) => {
-          const p = toScreen(m.coordinate);
-          if (p.x < -60 || p.y < -60 || p.x > size.width + 60 || p.y > size.height + 60) return null;
-          const style = MARKER_STYLE[m.kind];
-          const selected = selectedMarkerId === m.id;
-          return (
-            <Pressable
-              key={m.id}
-              onPress={() => onMarkerPress?.(m.id)}
-              style={[styles.marker, { left: p.x - 15, top: p.y - 34 }]}
-            >
-              <View
-                style={[
-                  styles.pin,
-                  { backgroundColor: style.color },
-                  selected && styles.pinSelected,
-                ]}
-              >
-                <Ionicons name={style.icon} size={14} color="#fff" />
-              </View>
-              <View style={[styles.pinTail, { borderTopColor: style.color }]} />
-              {selected && m.label ? (
-                <View style={styles.pinLabel}>
-                  <Text style={styles.pinLabelText} numberOfLines={1}>
-                    {m.label}
-                  </Text>
-                </View>
-              ) : null}
-            </Pressable>
-          );
-        })}
-      </Pressable>
-
-      <View style={styles.zoomControls}>
-        <Pressable style={styles.zoomBtn} onPress={() => setZoom((z) => Math.min(18, z + 1))}>
-          <Ionicons name="add" size={19} color={theme.colors.text} />
-        </Pressable>
-        <View style={styles.zoomDivider} />
-        <Pressable style={styles.zoomBtn} onPress={() => setZoom((z) => Math.max(10, z - 1))}>
-          <Ionicons name="remove" size={19} color={theme.colors.text} />
-        </Pressable>
-      </View>
-
-      <Pressable style={styles.recenter} onPress={() => setCenter(initialCenter)}>
-        <Ionicons name="locate" size={17} color={theme.colors.primary} />
-      </Pressable>
-
-      <Text style={styles.attribution}>© OpenStreetMap contributors</Text>
+    <View style={[styles.wrap, { height }]}>
+      <WebView
+        ref={webviewRef}
+        source={{ html }}
+        originWhitelist={['*']}
+        onMessage={handleMessage}
+        // These catch the WebView failing to load the page at all (e.g. no network), which is
+        // a different failure from the Mapbox-internal 'error' message handled above.
+        onError={(e) => setLoadError(e.nativeEvent.description || 'The map failed to load.')}
+        onHttpError={(e) => setLoadError(`The map failed to load (HTTP ${e.nativeEvent.statusCode}).`)}
+        style={styles.webview}
+        javaScriptEnabled
+        domStorageEnabled
+        geolocationEnabled={false}
+        // The map draws its own attribution; a bounce here would clip it.
+        bounces={false}
+      />
+      {loadError ? (
+        <View style={styles.errorOverlay} pointerEvents="none">
+          <Text style={styles.missingTokenText}>Map failed to load: {loadError}</Text>
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -263,80 +169,14 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: theme.colors.border,
   },
-  tile: { position: 'absolute', width: TILE, height: TILE },
-
-  radius: {
-    position: 'absolute',
-    backgroundColor: 'rgba(46,125,91,0.14)',
-    borderWidth: 2,
-    borderColor: 'rgba(46,125,91,0.55)',
-  },
-
-  marker: { position: 'absolute', alignItems: 'center', width: 30 },
-  pin: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
+  webview: { flex: 1, backgroundColor: 'transparent' },
+  missingToken: { alignItems: 'center', justifyContent: 'center', padding: 20 },
+  errorOverlay: {
+    ...StyleSheet.absoluteFillObject,
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 2,
-    borderColor: '#fff',
-    ...theme.shadow.card,
+    padding: 20,
+    backgroundColor: 'rgba(220,38,38,0.06)',
   },
-  pinSelected: { transform: [{ scale: 1.22 }] },
-  pinTail: {
-    width: 0,
-    height: 0,
-    borderLeftWidth: 5,
-    borderRightWidth: 5,
-    borderTopWidth: 7,
-    borderLeftColor: 'transparent',
-    borderRightColor: 'transparent',
-    marginTop: -2,
-  },
-  pinLabel: {
-    marginTop: 3,
-    maxWidth: 140,
-    paddingHorizontal: 7,
-    paddingVertical: 3,
-    borderRadius: theme.radius.sm,
-    backgroundColor: theme.colors.text,
-  },
-  pinLabelText: { color: '#fff', fontSize: 11, fontWeight: '600' },
-
-  zoomControls: {
-    position: 'absolute',
-    right: 10,
-    top: 10,
-    backgroundColor: theme.colors.surface,
-    borderRadius: theme.radius.sm,
-    overflow: 'hidden',
-    ...theme.shadow.card,
-  },
-  zoomBtn: { width: 34, height: 34, alignItems: 'center', justifyContent: 'center' },
-  zoomDivider: { height: 1, backgroundColor: theme.colors.border },
-
-  recenter: {
-    position: 'absolute',
-    right: 10,
-    bottom: 28,
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    backgroundColor: theme.colors.surface,
-    alignItems: 'center',
-    justifyContent: 'center',
-    ...theme.shadow.card,
-  },
-
-  attribution: {
-    position: 'absolute',
-    left: 6,
-    bottom: 4,
-    fontSize: 9,
-    color: theme.colors.textSoft,
-    backgroundColor: 'rgba(255,255,255,0.75)',
-    paddingHorizontal: 4,
-    borderRadius: 3,
-  },
+  missingTokenText: { fontSize: 12.5, lineHeight: 18, color: theme.colors.textSoft, textAlign: 'center' },
 });
