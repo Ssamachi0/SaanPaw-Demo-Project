@@ -70,6 +70,34 @@ export function buildMapHtml(initial: MapInitialState): string {
   <script>
     var CONFIG = ${configJson};
     mapboxgl.accessToken = CONFIG.token;
+    // Mapbox defaults to one heavy tile-processing worker per CPU core. On a lower-memory phone
+    // that can exhaust memory and cause it to stall rather than fail outright, one worker is
+    // slower per-tile but far more likely to actually complete on constrained hardware.
+    if ('workerCount' in mapboxgl) mapboxgl.workerCount = 1;
+
+    // Mapbox always renders at window.devicePixelRatio with no override of its own. On a phone
+    // whose GPU struggles to allocate texture memory at full density (2-3x is common on Android),
+    // forcing 1x cuts that memory need by 4-9x. The map looks a little softer on a high-density
+    // screen, but that is worth it on hardware where the alternative is not rendering at all.
+    try {
+      Object.defineProperty(window, 'devicePixelRatio', { value: 1, configurable: true });
+    } catch (e) {}
+
+    // Mapbox's own anonymous usage telemetry - not map data, nothing renders depends on it. Seen
+    // to hang indefinitely on some networks with no response and no error, and Mapbox queues its
+    // own requests behind ones still in flight, so one hung telemetry call was enough to block
+    // every real tile behind it forever. Skipping it outright, with the same 204 its server
+    // normally returns, keeps that queue moving regardless of what the network does with it.
+    var origFetch = window.fetch;
+    if (origFetch) {
+      window.fetch = function (input, init) {
+        var url = typeof input === 'string' ? input : (input && input.url) || '';
+        if (url.indexOf('events.mapbox.com') !== -1 || url.indexOf('events.mapbox.cn') !== -1) {
+          return Promise.resolve(new Response(null, { status: 204 }));
+        }
+        return origFetch.apply(this, arguments);
+      };
+    }
 
     var map = new mapboxgl.Map({
       container: 'map',
@@ -80,6 +108,23 @@ export function buildMapHtml(initial: MapInitialState): string {
       maxZoom: CONFIG.maxZoom,
     });
     map.addControl(new mapboxgl.NavigationControl({ showCompass: false }), 'top-right');
+
+    // Mapbox measures its container once at construction and never re-measures on its own. The
+    // WebView's own frame isn't always at its final React Native-assigned size by then (Android
+    // especially), so without this the map can lock in a zero/stale size and never request a
+    // single tile - it looks entirely blank even though its own controls and attribution, which
+    // don't depend on that measurement, render fine. A resize observer catches every later size
+    // change; the explicit calls below catch the very first one, before it fires.
+    var mapEl = document.getElementById('map');
+    if (window.ResizeObserver) {
+      new ResizeObserver(function () { map.resize(); }).observe(mapEl);
+    }
+    map.resize();
+    requestAnimationFrame(function () { map.resize(); });
+    // A screen-transition animation still running when the WebView first mounts can leave its
+    // frame settling later than one animation frame - these catch that without needing a retry loop.
+    setTimeout(function () { map.resize(); }, 300);
+    setTimeout(function () { map.resize(); }, 1000);
 
     function post(message) {
       if (window.ReactNativeWebView) window.ReactNativeWebView.postMessage(JSON.stringify(message));
